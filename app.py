@@ -51,6 +51,12 @@ def main():
                         help="Override LoRA strength")
     parser.add_argument("--hf-token-env", type=str, default=None, 
                         help="Override Hugging Face token environment variable name")
+    parser.add_argument("--fallback-backend", type=str, default=None, 
+                        help="Override fallback visual backend (e.g. image_folder)")
+    parser.add_argument("--final-width", type=int, default=None, 
+                        help="Override final video width (e.g. 1080)")
+    parser.add_argument("--final-height", type=int, default=None, 
+                        help="Override final video height (e.g. 1920)")
     parser.add_argument("--config", type=str, default=None, 
                         help="Path to custom config YAML file to load")
     
@@ -101,6 +107,12 @@ def main():
         config.yaml_config.setdefault('render', {})['lora_strength'] = args.lora_strength
     if args.hf_token_env:
         config.yaml_config.setdefault('huggingface', {})['token_env'] = args.hf_token_env
+    if args.fallback_backend:
+        config.yaml_config.setdefault('render', {})['fallback_backend'] = args.fallback_backend
+    if args.final_width is not None:
+        config.yaml_config.setdefault('render', {})['final_width'] = args.final_width
+    if args.final_height is not None:
+        config.yaml_config.setdefault('render', {})['final_height'] = args.final_height
         
     project_name = config.get_project_name()
     output_dir = os.path.join("output", project_name)

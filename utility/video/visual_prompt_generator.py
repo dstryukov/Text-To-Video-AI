@@ -41,6 +41,15 @@ def generate_visual_prompts(script_or_scenes, output_path=None):
             scene['subtitle'] = s.get('subtitle', scene['text'])
             scene['visual_type'] = s.get('visual_type', mode)
             scene['style_preset'] = s.get('style_preset', style_preset_name)
+            
+            # Добавляем stock_query
+            scene['stock_query'] = s.get('stock_query', '')
+            if not scene['stock_query']:
+                if mode == 'stock_keywords':
+                    scene['stock_query'] = scene['prompt']
+                else:
+                    scene['stock_query'] = " ".join(scene['prompt'].split()[:4])
+                    
             scenes.append(scene)
             
         with open(output_path, 'w', encoding='utf-8') as f:
@@ -74,6 +83,7 @@ Each scene in the JSON array must contain exactly these fields:
 7. "subtitle": string, the subtitle text to display during this scene (should be matching or summarizing the text, short and readable).
 8. "visual_type": string, matching the generation mode (e.g. "{mode}").
 9. "style_preset": string, matching the style preset name (e.g. "{style_preset_name}").
+10. "stock_query": string, a short 2-4 word visually concrete English search query for stock video search engines (e.g. "red planet surface", "smiling student"). If mode is stock_keywords, stock_query must match the prompt.
 
 All scenes must be strictly consecutive and cover the entire script without overlaps or gaps.
 Your response must be a single, valid JSON array containing the list of scene objects. Do not wrap it in any formatting other than standard json code block (or return raw json). Do not add any text before or after the JSON array.
@@ -143,6 +153,14 @@ Your response must be a single, valid JSON array containing the list of scene ob
                 scene['subtitle'] = scene.get('subtitle', scene['text'])
                 scene['visual_type'] = scene.get('visual_type', mode)
                 scene['style_preset'] = scene.get('style_preset', style_preset_name)
+                
+                # Добавляем/проверяем stock_query
+                scene['stock_query'] = scene.get('stock_query', '')
+                if not scene['stock_query']:
+                    if mode == 'stock_keywords':
+                        scene['stock_query'] = scene['prompt']
+                    else:
+                        scene['stock_query'] = " ".join(scene['prompt'].split()[:4])
             
             # Сохранение в файл
             with open(output_path, 'w', encoding='utf-8') as f:
@@ -162,16 +180,18 @@ Your response must be a single, valid JSON array containing the list of scene ob
     
     if isinstance(script_or_scenes, list):
         for idx, s in enumerate(script_or_scenes):
+            prompt = s.get('prompt', 'abstract visual background')
             fallback_scenes.append({
                 "scene_id": s.get('scene_id', idx + 1),
                 "text": s.get('text', ''),
                 "duration": float(s.get('duration', 5.0)),
-                "prompt": s.get('prompt', 'abstract visual background'),
+                "prompt": prompt,
                 "negative_prompt": "blurry, low quality",
                 "camera_motion": "slow_zoom_in",
                 "subtitle": s.get('subtitle', s.get('text', '')),
                 "visual_type": mode,
-                "style_preset": style_preset_name
+                "style_preset": style_preset_name,
+                "stock_query": s.get('stock_query') or " ".join(prompt.split()[:4])
             })
     else:
         # Разбиваем текст по предложениям
@@ -183,16 +203,18 @@ Your response must be a single, valid JSON array containing the list of scene ob
         for idx, sentence in enumerate(sentences):
             words = len(sentence.split())
             duration = max(2.5, words / 2.5)
+            prompt = f"Scenic visual representing: {sentence[:30]}"
             fallback_scenes.append({
                 "scene_id": idx + 1,
                 "text": sentence,
                 "duration": duration,
-                "prompt": f"Scenic visual representing: {sentence[:30]}",
+                "prompt": prompt,
                 "negative_prompt": "blurry, low quality",
                 "camera_motion": "slow_zoom_in",
                 "subtitle": sentence,
                 "visual_type": mode,
-                "style_preset": style_preset_name
+                "style_preset": style_preset_name,
+                "stock_query": " ".join(prompt.split()[:4])
             })
             
     with open(output_path, 'w', encoding='utf-8') as f:

@@ -187,21 +187,9 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None):
             
         except Exception as e:
             print(f"Error in Silero TTS: {e}")
-            print("Falling back to EdgeTTS...")
-            # Fallback to EdgeTTS
-            try:
-                import asyncio
-                from utility.tts.edgetts_tts import generate_audio as edgetts_audio
-                # Карту голосов для EdgeTTS
-                fallback_voice = "ru-RU-SvetlanaNeural" if "ru" in config_dict.get('language', 'ru') else "en-US-JennyNeural"
-                asyncio.run(edgetts_audio(processed_text, output_path, fallback_voice))
-                print("EdgeTTS fallback audio generated successfully.")
-                return output_path
-            except Exception as e2:
-                print(f"EdgeTTS fallback failed: {e2}")
-                print("Falling back to silent audio generation...")
-                generate_silence(output_path, processed_text, sample_rate)
-                return output_path
+            print("Falling back to silent audio generation...")
+            generate_silence(output_path, processed_text, sample_rate)
+            return output_path
 
     # Бэкенд 2: LOCAL_API (внешний HTTP сервис)
     elif backend == 'local_api':
@@ -235,13 +223,10 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None):
         return output_path
 
     else:
-        # Устаревшие провайдеры для обратной совместимости (edgetts, elevenlabs)
+        # Устаревшие провайдеры для обратной совместимости (elevenlabs)
         try:
             import asyncio
-            if backend == 'edgetts':
-                from utility.tts.edgetts_tts import generate_audio as edgetts_audio
-                asyncio.run(edgetts_audio(processed_text, output_path, voice))
-            elif backend == 'elevenlabs':
+            if backend == 'elevenlabs':
                 from utility.tts.elevenlabs_tts import generate_audio as elevenlabs_audio
                 asyncio.run(elevenlabs_audio(processed_text, output_path, voice))
             else:

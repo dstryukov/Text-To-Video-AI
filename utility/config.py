@@ -76,16 +76,7 @@ class Config:
         vg_cfg = self.get_visual_generator_config()
         needs_pexels = (render_cfg.get('visual_backend') == 'stock_video' or vg_cfg.get('mode') == 'stock_keywords')
         if needs_pexels and not os.getenv('PEXELS_API_KEY'):
-            errors.append("Missing required API key: PEXELS_API_KEY (required when visual_backend=stock_video or mode=stock_keywords)")
-        
-        stt_provider = self.get_stt_provider()
-        if stt_provider not in ['whisper', 'deepgram']:
-            errors.append(
-                f"Invalid STT_PROVIDER: '{stt_provider}'. Must be one of: whisper, deepgram"
-            )
-        elif stt_provider == 'deepgram':
-            if not os.getenv('DEEPGRAM_API_KEY'):
-                errors.append("Missing required API key: DEEPGRAM_API_KEY (required for STT_PROVIDER=deepgram)")
+            print("Warning: PEXELS_API_KEY not found. stock_video backend will be unavailable. If triggered, fallback backend will be used.")
         
         if errors:
             error_message = "Configuration validation failed:\n\n"

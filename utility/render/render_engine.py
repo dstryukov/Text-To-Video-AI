@@ -66,6 +66,78 @@ def crop_clip(clip, x1=None, y1=None, x2=None, y2=None):
             return clip.crop(x1=x1, y1=y1, x2=x2, y2=y2)
         raise
 
+def create_text_clip(text, font, font_size, color, stroke_width, stroke_color, size, method="caption"):
+    # We want a list of font fallbacks based on what was requested
+    fonts_to_try = [font]
+    
+    # Try mapping common names to actual font files on Windows
+    font_lower = font.lower()
+    if platform.system() == "Windows":
+        if "arial" in font_lower:
+            if "bold" in font_lower:
+                fonts_to_try.append("arialbd.ttf")
+            elif "italic" in font_lower:
+                fonts_to_try.append("ariali.ttf")
+            else:
+                fonts_to_try.append("arial.ttf")
+        elif "times" in font_lower:
+            if "bold" in font_lower:
+                fonts_to_try.append("timesbd.ttf")
+            elif "italic" in font_lower:
+                fonts_to_try.append("timesi.ttf")
+            else:
+                fonts_to_try.append("times.ttf")
+        elif "courier" in font_lower:
+            if "bold" in font_lower:
+                fonts_to_try.append("courbd.ttf")
+            elif "italic" in font_lower:
+                fonts_to_try.append("couri.ttf")
+            else:
+                fonts_to_try.append("cour.ttf")
+    
+    # Add general fallbacks at the end
+    fallbacks = ["arial.ttf", "LiberationSans-Regular.ttf", "DejaVuSans.ttf", "Arial", "sans-serif"]
+    for f in fallbacks:
+        if f not in fonts_to_try:
+            fonts_to_try.append(f)
+            
+    # Try creating TextClip with each font in sequence until one succeeds
+    last_err = None
+    for f in fonts_to_try:
+        try:
+            # Try moviepy v2 first
+            return TextClip(
+                text=text,
+                font=f,
+                font_size=font_size,
+                color=color,
+                stroke_width=stroke_width,
+                stroke_color=stroke_color,
+                size=size,
+                method=method
+            )
+        except TypeError:
+            # If it's a TypeError, maybe it's moviepy v1 signature (arguments: txt, fontsize)
+            try:
+                return TextClip(
+                    txt=text,
+                    font=f,
+                    fontsize=font_size,
+                    color=color,
+                    stroke_width=stroke_width,
+                    stroke_color=stroke_color,
+                    size=size,
+                    method=method
+                )
+            except Exception as e:
+                last_err = e
+        except Exception as e:
+            last_err = e
+            
+    if last_err:
+        raise last_err
+    raise RuntimeError("Failed to create TextClip with all font fallbacks.")
+
 # ----------------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ -----------------
 
 def download_file(url, filename):
@@ -90,16 +162,90 @@ def get_program_path(program_name):
 
 def clear_cuda_memory():
     """Очистка кэша CUDA и вызов сборщика мусора для предотвращения OOM."""
-    import gc
-    gc.collect()
     try:
+        import gc
         import torch
+        gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
-            print("CUDA memory and cache cleared successfully.")
-    except Exception as e:
+    except Exception:
         pass
+
+def resolve_generation_params(config):
+    """
+    Разрешение параметров генерации на основе приоритетов:
+    1. CLI overrides / render.* explicit values
+    2. acceleration_preset
+    3. model_preset
+    4. default values
+    """
+    render_cfg = config.get_render_config()
+    explicit_render = config.yaml_config.get('render', {})
+    
+    default_render = {
+        'steps': 4,
+        'guidance_scale': 0.0,
+        'sampler': 'euler',
+        'scheduler': 'simple'
+    }
+    
+    model_preset_name = render_cfg.get('model_preset')
+    model_preset = config.get_model_preset(model_preset_name) if model_preset_name else {}
+    
+    acc_mode = render_cfg.get('acceleration_mode')
+    acc_preset = {}
+    if acc_mode:
+        preset_name = f"{acc_mode}_4step"  # дефолтное предположение
+        rec_steps = model_preset.get('recommended_steps')
+        if acc_mode == 'turbo':
+            if rec_steps == 6:
+                preset_name = "turbo_6step"
+            else:
+                preset_name = "turbo_4step"
+        elif acc_mode == 'schnell':
+            preset_name = "schnell_4step"
+        elif acc_mode == 'distilled':
+            preset_name = "distilled_6step"
+        elif acc_mode == 'lcm':
+            preset_name = "lcm_6step"
+        elif acc_mode == 'lightning':
+            preset_name = "lightning_4step"
+        elif acc_mode == 'hyper':
+            preset_name = "hyper_8step"
+            
+        acc_preset = config.get_acceleration_preset(preset_name)
+        if not acc_preset:
+            acc_preset = {}
+
+    def get_param(key, default_val):
+        # 1 & 2. CLI / Explicit render section in yaml
+        if key in explicit_render and explicit_render[key] is not None:
+            return explicit_render[key]
+        # 3. Acceleration preset
+        if key in acc_preset and acc_preset[key] is not None:
+            return acc_preset[key]
+        # 4. Model preset
+        model_key = key
+        if key == 'steps' and 'recommended_steps' in model_preset:
+            model_key = 'recommended_steps'
+        if key == 'guidance_scale' and 'guidance_scale' in model_preset:
+            model_key = 'guidance_scale'
+            
+        if model_key in model_preset and model_preset[model_key] is not None:
+            return model_preset[model_key]
+        # 5. Default
+        return default_val
+
+    resolved = {
+        'steps': get_param('steps', default_render['steps']),
+        'guidance_scale': get_param('guidance_scale', default_render['guidance_scale']),
+        'sampler': get_param('sampler', default_render['sampler']),
+        'scheduler': get_param('scheduler', default_render['scheduler']),
+        'model_preset': model_preset_name,
+        'acceleration_mode': acc_mode
+    }
+    return resolved
 
 # ----------------- БЭКЕНДЫ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЙ -----------------
 
@@ -115,6 +261,10 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
     model_preset_name = render_cfg.get('model_preset')
     model_preset = config.get_model_preset(model_preset_name) if model_preset_name else {}
     
+    if model_preset_name:
+        if model_preset.get('enabled') is False:
+            raise ValueError(f"Model preset {model_preset_name} is disabled or workflow is missing.")
+            
     # 1. Определение файла воркфлоу
     workflow_path = model_preset.get('workflow') or render_cfg.get('comfyui_workflow_path') or comfyui_cfg.get('workflow_path')
     if not workflow_path:
@@ -122,21 +272,20 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
         
     full_workflow_path = os.path.join(os.getcwd(), workflow_path)
     if not os.path.exists(full_workflow_path):
-        raise FileNotFoundError(f"Workflow file not found: {full_workflow_path}")
+        raise FileNotFoundError(f"Workflow file not found: {workflow_path}")
         
-    print(f"Loading ComfyUI workflow template: {full_workflow_path}")
+    print(f"Loading workflow: {workflow_path}")
     with open(full_workflow_path, 'r', encoding='utf-8') as f:
         workflow = json.load(f)
         
     node_map = comfyui_cfg.get('node_map', {})
     
     # 2. Вычисление параметров генерации
-    steps = render_cfg.get('steps') or model_preset.get('recommended_steps', 4)
-    guidance = render_cfg.get('guidance_scale')
-    if guidance is None:
-        guidance = model_preset.get('guidance_scale', 0.0)
-    sampler = render_cfg.get('sampler') or model_preset.get('sampler', 'euler')
-    scheduler = render_cfg.get('scheduler') or model_preset.get('scheduler', 'simple')
+    resolved = resolve_generation_params(config)
+    steps = resolved.get('steps')
+    guidance = resolved.get('guidance_scale')
+    sampler = resolved.get('sampler')
+    scheduler = resolved.get('scheduler')
     
     seed = render_cfg.get('seed', -1)
     if seed == -1:
@@ -211,14 +360,18 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
             
     # 4. Отправка POST запроса на запуск
     p = {"prompt": workflow}
-    response = requests.post(f"{comfyui_url}/prompt", json=p, timeout=30)
-    response.raise_for_status()
+    try:
+        response = requests.post(f"{comfyui_url}/prompt", json=p, timeout=30)
+        response.raise_for_status()
+    except Exception as e:
+        raise ConnectionError(f"Could not connect to ComfyUI at {comfyui_url}")
+        
     resp_data = response.json()
     prompt_id = resp_data.get('prompt_id')
     if not prompt_id:
         raise RuntimeError("ComfyUI response did not contain prompt_id")
         
-    print(f"Prompt queued successfully in ComfyUI (prompt_id: {prompt_id}). Polling status...")
+    print(f"ComfyUI prompt queued: {prompt_id}")
     
     # 5. Опрос готовности
     timeout_sec = comfyui_cfg.get('timeout_sec', 300)
@@ -227,12 +380,15 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
     
     history_data = None
     while time.time() - start_time < timeout_sec:
-        history_resp = requests.get(f"{comfyui_url}/history/{prompt_id}")
-        if history_resp.status_code == 200:
-            history_json = history_resp.json()
-            if prompt_id in history_json:
-                history_data = history_json[prompt_id]
-                break
+        try:
+            history_resp = requests.get(f"{comfyui_url}/history/{prompt_id}", timeout=10)
+            if history_resp.status_code == 200:
+                history_json = history_resp.json()
+                if prompt_id in history_json:
+                    history_data = history_json[prompt_id]
+                    break
+        except Exception:
+            pass
         time.sleep(poll_interval_sec)
         
     if not history_data:
@@ -255,7 +411,7 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
             break
             
     if not image_info:
-        raise RuntimeError(f"ComfyUI history did not contain generated images. History: {history_data}")
+        raise RuntimeError(f"ComfyUI history did not contain generated images.")
         
     filename = image_info.get('filename')
     subfolder = image_info.get('subfolder', '')
@@ -263,21 +419,22 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
     
     # 7. Скачивание картинки
     view_url = f"{comfyui_url}/view?filename={filename}&subfolder={subfolder}&type={img_type}"
-    print(f"Downloading generated image: {view_url}")
-    img_resp = requests.get(view_url, timeout=30)
-    img_resp.raise_for_status()
-    
+    try:
+        img_resp = requests.get(view_url, timeout=30)
+        img_resp.raise_for_status()
+    except Exception:
+        raise ConnectionError(f"Could not connect to ComfyUI at {comfyui_url}")
+        
     with open(output_path, 'wb') as f:
         f.write(img_resp.content)
         
-    print(f"Saved ComfyUI image to: {output_path}")
+    print(f"Generated image saved to: {output_path}")
     return output_path
 
 
-def generate_local_api_image(prompt, negative_prompt, output_path, width=512, height=512, url="http://127.0.0.1:8000/txt2img"):
+def generate_local_api_image(prompt, negative_prompt, output_path, width=512, height=512, url="http://127.0.0.1:8000/txt2img", params=None):
     """
     Генерация через кастомный локальный API. 
-    Поддерживает: бинарный поток (raw bytes), JSON с base64 (включая списки) и JSON с URL картинки.
     """
     payload = {
         "prompt": prompt,
@@ -285,6 +442,11 @@ def generate_local_api_image(prompt, negative_prompt, output_path, width=512, he
         "width": width,
         "height": height
     }
+    if params:
+        payload.update(params)
+        if 'guidance_scale' in params:
+            payload['cfg'] = params['guidance_scale']
+            
     try:
         print(f"Sending generation request to local API: {url}...")
         response = requests.post(url, json=payload, timeout=60)
@@ -300,8 +462,6 @@ def generate_local_api_image(prompt, negative_prompt, output_path, width=512, he
         # 2. Иначе пробуем распарсить JSON
         try:
             r = response.json()
-            
-            # Поиск base64 в типичных ключах
             b64_data = None
             for key in ['image', 'images', 'base64', 'b64']:
                 if key in r:
@@ -320,7 +480,6 @@ def generate_local_api_image(prompt, negative_prompt, output_path, width=512, he
                     f.write(image_bytes)
                 return output_path
                 
-            # Поиск URL в типичных ключах
             img_url = None
             for key in ['url', 'image_url', 'link']:
                 if key in r:
@@ -333,7 +492,6 @@ def generate_local_api_image(prompt, negative_prompt, output_path, width=512, he
                 return output_path
                 
         except json.JSONDecodeError:
-            # Если это не JSON, но тело ответа большое - возможно, это сырые байты картинки без заголовка Content-Type
             if len(response.content) > 1000:
                 with open(output_path, 'wb') as f:
                     f.write(response.content)
@@ -382,24 +540,34 @@ def get_image_from_folder(folder_path, scene_id, index):
     patterns = [
         f"scene_{scene_id}.png", f"scene_{scene_id}.jpg", f"scene_{scene_id}.jpeg",
         f"{scene_id}.png", f"{scene_id}.jpg", f"{scene_id}.jpeg",
-        f"scene_{scene_id}.mp4", f"{scene_id}.mp4"
+        f"scene_{scene_id}.mp4", f"{scene_id}.mp4",
+        f"scene_{scene_id}.mov", f"{scene_id}.mov",
+        f"scene_{scene_id}.avi", f"{scene_id}.avi",
+        f"scene_{scene_id}.mkv", f"{scene_id}.mkv"
     ]
     for pattern in patterns:
         path = os.path.join(folder_path, pattern)
         if os.path.exists(path):
             return path
             
-    files = sorted([f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f))])
-    valid_exts = ('.png', '.jpg', '.jpeg', '.mp4')
-    media_files = [f for f in files if f.lower().endswith(valid_exts)]
-    if media_files:
-        filename = media_files[index % len(media_files)]
-        return os.path.join(folder_path, filename)
+    # Если точного совпадения нет, ищем медиафайлы по списку расширений
+    valid_exts = ('.png', '.jpg', '.jpeg', '.mp4', '.mov', '.avi', '.mkv')
+    files = sorted([f for f in os.listdir(folder_path) if os.path.isfile(os.path.join(folder_path, f)) and f.lower().endswith(valid_exts)])
+    if files:
+        filename = files[index % len(files)]
+        path = os.path.join(folder_path, filename)
+        print(f"Using local media file: {path}")
+        return path
     return None
 
 
 def download_pexels_video(query, output_path, orientation_landscape=True):
     """Поиск и скачивание видео с Pexels."""
+    pexels_key = os.getenv('PEXELS_API_KEY')
+    if not pexels_key:
+        print("Warning: PEXELS_API_KEY not found. stock_video backend unavailable. Trying fallback backend.")
+        return None
+        
     try:
         from utility.video.background_video_generator import getBestVideo
         print(f"Searching Pexels video for query: {query}...")
@@ -408,6 +576,8 @@ def download_pexels_video(query, output_path, orientation_landscape=True):
             print(f"Downloading Pexels video: {url}...")
             download_file(url, output_path)
             return output_path
+        else:
+            print(f"No video found on Pexels for query: {query}")
         return None
     except Exception as e:
         print(f"Pexels video download failed: {e}")
@@ -424,7 +594,8 @@ def generate_image_by_backend(backend, prompt, negative_prompt, output_path, wid
     if backend == 'comfyui':
         return generate_comfyui_image(prompt, negative_prompt, output_path, width, height, config)
     elif backend == 'local_api':
-        return generate_local_api_image(prompt, negative_prompt, output_path, width, height, local_image_api_url)
+        params = resolve_generation_params(config)
+        return generate_local_api_image(prompt, negative_prompt, output_path, width, height, local_image_api_url, params)
     elif backend == 'a1111':
         return generate_a1111(prompt, negative_prompt, output_path, width, height, local_image_api_url)
     elif backend == 'image_folder':
@@ -503,21 +674,38 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
     config = get_config()
     aspect_ratio = config.get_aspect_ratio()
     
-    if aspect_ratio == "9:16":
-        target_w, target_h = 1080, 1920
-    elif aspect_ratio == "16:9":
-        target_w, target_h = 1920, 1080
-    elif aspect_ratio == "1:1":
-        target_w, target_h = 1080, 1080
-    else:
-        target_w, target_h = 1080, 1920
-        
     render_cfg = config.get_render_config()
     visual_backend = render_cfg.get('visual_backend', 'none').lower()
     fallback_backend = render_cfg.get('fallback_backend', 'image_folder').lower()
     fallback_to_black = render_cfg.get('fallback_to_black', True)
     default_motion_preset = render_cfg.get('motion_preset', 'slow_zoom_in')
     
+    # 1. Разрешение итогового видео
+    target_w = int(render_cfg.get("final_width", 0))
+    target_h = int(render_cfg.get("final_height", 0))
+
+    if not target_w or not target_h:
+        if aspect_ratio == "9:16":
+            target_w, target_h = 1080, 1920
+        elif aspect_ratio == "16:9":
+            target_w, target_h = 1920, 1080
+        elif aspect_ratio == "1:1":
+            target_w, target_h = 1080, 1080
+        else:
+            target_w, target_h = 1080, 1920
+
+    # 2. Вычисление параметров генерации по приоритетам
+    resolved = resolve_generation_params(config)
+    steps = resolved.get('steps')
+    guidance = resolved.get('guidance_scale')
+    sampler = resolved.get('sampler')
+    scheduler = resolved.get('scheduler')
+    model_preset_name = resolved.get('model_preset', 'none')
+    
+    model_preset = config.get_model_preset(model_preset_name) if model_preset_name else {}
+    quantization = model_preset.get('quantization', 'none')
+    
+    # Разрешение генерации картинок
     image_width = render_cfg.get('image_width', 576)
     image_height = render_cfg.get('image_height', 1024)
     
@@ -526,7 +714,27 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
         image_width, image_height = 1024, 576
     elif aspect_ratio == "1:1" and image_width == 576 and image_height == 1024:
         image_width, image_height = 768, 768
+
+    # Выводим подробное стартовое логирование параметров
+    print("\n" + "="*80)
+    print("STARTING RENDER ENGINE WITH PARAMETERS:")
+    print(f"Selected visual backend: {visual_backend}")
+    print(f"Selected model preset: {model_preset_name}")
+    print(f"Model quantization: {quantization}")
+    print(f"Acceleration mode: {resolved.get('acceleration_mode', 'none')}")
+    print(f"Generation size: {image_width}x{image_height}")
+    print(f"Final video size: {target_w}x{target_h}")
+    print(f"Steps: {steps}")
+    print(f"Guidance scale: {guidance}")
+    print(f"Sampler: {sampler}")
+    print(f"Scheduler: {scheduler}")
+    print(f"LoRA preset: {render_cfg.get('lora_preset', 'none')}")
+    print(f"Fallback backend: {fallback_backend}")
     
+    pexels_status = "enabled" if os.getenv('PEXELS_API_KEY') else "disabled"
+    print(f"Stock video backend: {pexels_status}")
+    print("="*80 + "\n")
+
     magick_path = get_program_path("magick")
     if magick_path:
         os.environ['IMAGEMAGICK_BINARY'] = magick_path
@@ -550,6 +758,10 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
         neg_prompt = scene.get('negative_prompt', 'blurry, low quality')
         motion_preset = scene.get('camera_motion', default_motion_preset)
         
+        # Определяем промпт/запрос для стоков
+        stock_query = scene.get('stock_query') or prompt
+        backend_prompt = stock_query if visual_backend == 'stock_video' else prompt
+        
         visual_path = None
         out_img = os.path.join(images_dir, f"scene_{scene_id}.png")
         
@@ -557,18 +769,23 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
         if visual_backend != 'none':
             try:
                 print(f"\n--- Scene {scene_id}: Generating image with primary backend '{visual_backend}' ---")
-                
-                # If backend is stock_video, output path should use .mp4
-                actual_out_path = out_img
                 if visual_backend == 'stock_video':
+                    print(f"Using stock query: {stock_query}")
                     actual_out_path = os.path.join(images_dir, f"scene_{scene_id}.mp4")
+                else:
+                    actual_out_path = out_img
                     
                 visual_path = generate_image_by_backend(
-                    visual_backend, prompt, neg_prompt, actual_out_path, 
+                    visual_backend, backend_prompt, neg_prompt, actual_out_path, 
                     image_width, image_height, scene_id, idx, config
                 )
             except Exception as e:
-                print(f"Error on primary backend '{visual_backend}': {e}")
+                err_msg = str(e)
+                print(f"Error on primary backend '{visual_backend}': {err_msg}")
+                if any(marker in err_msg for marker in ["CUDA out of memory", "out of memory", "CUDA error", "CUBLAS"]):
+                    print("\n" + "="*80)
+                    print("CUDA OOM detected. Reduce image_width/image_height, use GGUF/FP8 workflow, or switch to image_folder/local_api/stock_video fallback.")
+                    print("="*80 + "\n")
                 visual_path = None
                 
         # --- Tier 2: Fallback Backend ---
@@ -577,16 +794,25 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
             if fallback_backend and fallback_backend != visual_backend and fallback_backend != 'none':
                 try:
                     print(f"Attempting fallback backend '{fallback_backend}'...")
-                    fallback_out_img = os.path.join(images_dir, f"scene_{scene_id}_fallback.png")
+                    
+                    fallback_out_path = os.path.join(images_dir, f"scene_{scene_id}_fallback.png")
+                    fallback_prompt = prompt
                     if fallback_backend == 'stock_video':
-                        fallback_out_img = os.path.join(images_dir, f"scene_{scene_id}_fallback.mp4")
+                        fallback_out_path = os.path.join(images_dir, f"scene_{scene_id}_fallback.mp4")
+                        fallback_prompt = stock_query
+                        print(f"Using stock query: {stock_query}")
                         
                     visual_path = generate_image_by_backend(
-                        fallback_backend, prompt, neg_prompt, fallback_out_img,
+                        fallback_backend, fallback_prompt, neg_prompt, fallback_out_path,
                         image_width, image_height, scene_id, idx, config
                     )
                 except Exception as e:
-                    print(f"Error on fallback backend '{fallback_backend}': {e}")
+                    err_msg = str(e)
+                    print(f"Error on fallback backend '{fallback_backend}': {err_msg}")
+                    if any(marker in err_msg for marker in ["CUDA out of memory", "out of memory", "CUDA error", "CUBLAS"]):
+                        print("\n" + "="*80)
+                        print("CUDA OOM detected. Reduce image_width/image_height, use GGUF/FP8 workflow, or switch to image_folder/local_api/stock_video fallback.")
+                        print("="*80 + "\n")
                     visual_path = None
                     
         # --- Post generation cleanup / garbage collection ---
@@ -618,9 +844,12 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
                     scene_clip = None
                     
         if scene_clip is None:
-            print(f"Rendering black screen for scene {scene_id} due to generation/fallback failure.")
-            scene_clip = set_clip_duration(ColorClip(size=(target_w, target_h), color=(0, 0, 0)), duration)
-            scene_clip = set_clip_position(scene_clip, "center")
+            if fallback_to_black or visual_backend == 'none':
+                print(f"Rendering black screen for scene {scene_id} as fallback.")
+                scene_clip = set_clip_duration(ColorClip(size=(target_w, target_h), color=(0, 0, 0)), duration)
+                scene_clip = set_clip_position(scene_clip, "center")
+            else:
+                raise RuntimeError(f"Visual asset generation failed for scene {scene_id} and fallback_to_black is disabled.")
             
         scene_clip = set_clip_start(scene_clip, current_time)
         visual_clips.append(scene_clip)
@@ -650,10 +879,10 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
                     position = ("center", int(target_h * 0.8))
                     
                 try:
-                    text_clip = TextClip(
-                        txt=subtitle_text,
+                    text_clip = create_text_clip(
+                        text=subtitle_text,
                         font=font_face,
-                        fontsize=font_size,
+                        font_size=font_size,
                         color=font_color,
                         stroke_width=stroke_width,
                         stroke_color=stroke_color,

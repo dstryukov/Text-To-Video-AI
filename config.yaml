@@ -30,8 +30,9 @@ visual_generator:
 
 # Настройки рендеринга и генерации визуалов по умолчанию
 render:
-  # Бэкенд визуализации: comfyui | local_api | image_folder | none
+  # Бэкенд визуализации: comfyui | local_api | image_folder | stock_video | none
   visual_backend: "comfyui"
+  fallback_backend: "image_folder"
   model_preset: "flux_schnell_fp8"
   acceleration_mode: "schnell"    # none | turbo | schnell | lcm | lightning | hyper | distilled
 
@@ -70,8 +71,10 @@ render:
   local_image_api_url: "http://127.0.0.1:8000/txt2img"
   image_folder_path: "input_images"
 
+  stock_video_provider: "pexels"
+  stock_video_orientation: "portrait"
+
   # Настройки отказоустойчивости (Fallback) и очистки кэша
-  fallback_backend: "image_folder"
   fallback_to_black: true
   clear_cuda_cache_between_scenes: true
 
@@ -101,6 +104,7 @@ style_presets:
 # Пресеты моделей для ComfyUI
 model_presets:
   flux_schnell_fp8:
+    enabled: true
     backend: "comfyui"
     workflow: "workflows/flux_schnell_fp8_4step.json"
     quantization: "fp8"
@@ -113,6 +117,7 @@ model_presets:
     scheduler: "simple"
 
   flux_schnell_gguf:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/flux_schnell_gguf_4step.json"
     quantization: "gguf"
@@ -125,6 +130,7 @@ model_presets:
     scheduler: "simple"
 
   z_image_turbo_fp8:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/z_image_turbo_fp8_6step.json"
     quantization: "fp8"
@@ -137,6 +143,7 @@ model_presets:
     scheduler: "simple"
 
   z_image_turbo_gguf:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/z_image_turbo_gguf_6step.json"
     quantization: "gguf"
@@ -149,6 +156,7 @@ model_presets:
     scheduler: "simple"
 
   flux_klein_fp8:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/flux_klein_fp8_fast.json"
     quantization: "fp8"
@@ -161,6 +169,7 @@ model_presets:
     scheduler: "simple"
 
   flux_klein_gguf:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/flux_klein_gguf_fast.json"
     quantization: "gguf"
@@ -173,6 +182,7 @@ model_presets:
     scheduler: "simple"
 
   qwen_image_turbo_fp8:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/qwen_image_turbo_fp8.json"
     quantization: "fp8"
@@ -185,6 +195,7 @@ model_presets:
     scheduler: "simple"
 
   qwen_image_turbo_gguf:
+    enabled: false
     backend: "comfyui"
     workflow: "workflows/qwen_image_turbo_gguf.json"
     quantization: "gguf"
