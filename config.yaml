@@ -1,0 +1,94 @@
+# Универсальные настройки пайплайна генерации видео
+
+# Название проекта (будет создана папка output/project_name/)
+project_name: "space_facts"
+
+# Соотношение сторон видео:
+#   - portrait (9:16) (YouTube Shorts, TikTok, Instagram Reels)
+#   - landscape (16:9) (Традиционный горизонтальный ролик)
+#   - square (1:1) (Квадратный ролик)
+aspect_ratio: "9:16"
+
+# Провайдер LLM для генерации сценария и промптов (openai, groq, gemini)
+llm_provider: "openai"
+llm_model: "gpt-4o"
+
+# 1. Настройки Text-To-Speech (TTS)
+tts:
+  # Бэкенд озвучки: silero | local_api | none
+  backend: "silero"
+  
+  # Язык озвучки (по умолчанию русский)
+  language: "ru"
+  
+  # Голос (для Silero: aidar, baya, kseniya, xenia, eugene)
+  voice: "xenia"
+  
+  # Темп речи (speed):
+  #   - Число (например: 1.0, 1.2, 0.8)
+  #   - Строковый пресет (x-slow, slow, medium, fast, x-fast)
+  speed: "medium"
+  
+  # Частота дискретизации (8000, 24000, 48000)
+  sample_rate: 24000
+  
+  # Формат аудиофайла (wav, mp3)
+  format: "wav"
+  
+  # Выполнять ли нормализацию текста (чистка разметки, преобразование спецсимволов)
+  normalize_text: true
+  
+  # Настройка локального API озвучки (используется, если backend=local_api)
+  local_api_url: "http://localhost:8010/tts"
+
+# 2. Настройки Visual Prompt Generator
+visual_generator:
+  # Режим генератора визуалов:
+  #   - image_prompts: детальные промпты для генераторов картинок (SD, Midjourney)
+  #   - video_prompts: промпты для генераторов видео (Runway, Sora)
+  #   - stock_keywords: ключевые слова на английском для поиска стоковых видео
+  mode: "image_prompts"
+  
+  # Пресет стиля из списка ниже
+  style_preset: "cinematic_realistic"
+
+# 3. Настройки Render Engine
+render:
+  # Бэкенд визуализации: sdxl_turbo | comfyui | a1111 | local_api | image_folder | stock_video | none
+  visual_backend: "none"
+  
+  # Пресет анимации камеры для статических изображений:
+  #   - none (без движения)
+  #   - slow_zoom_in (плавный наезд)
+  #   - slow_zoom_out (плавный отъезд)
+  #   - pan_left (плавное панорамирование влево)
+  #   - pan_right (плавное панорамирование вправо)
+  #   - handheld_light (легкое покачивание камеры с рук)
+  motion_preset: "slow_zoom_in"
+  
+  # Включить субтитры (true/false)
+  captions_enabled: true
+  
+  # URL для локальных API генерации изображений
+  local_image_api_url: "http://127.0.0.1:7860/sdapi/v1/txt2img"
+  
+  # Путь для бэкенда image_folder
+  image_folder_path: "input_images"
+
+# Субтитры и их стилизация
+captions:
+  font_size: 90
+  font_color: "white"             # white, yellow, cyan, red, green, blue, magenta
+  font_face: "Arial-Bold"
+  stroke_width: 3
+  stroke_color: "black"
+  position: "bottom_center"       # center, top, bottom, bottom_center, bottom_left, bottom_right
+
+# 4. Пресеты стилей для визуальных промптов (передаются в LLM при генерации)
+style_presets:
+  cinematic_realistic: "Cinematic style, highly detailed, realistic texture, 8k resolution, dramatic volumetric lighting, photorealistic, shot on 35mm lens, shallow depth of field."
+  documentary: "Documentary style photography, authentic, raw footage look, natural lighting, journalistic, real-world context, candid camera shot."
+  luxury_commercial: "Sleek commercial video, high-end production, premium luxury feel, extremely clean, professional studio lighting, perfect color grading, minimal background."
+  educational_clean: "Clean educational infographic style, modern vector graphics, minimalist, flat design, bright background, easy to read, simple and clear shapes."
+  dark_dystopian: "Dark dystopian mood, cinematic dramatic shadows, moody atmospheric, gritty cyberpunk details, neon highlights in darkness, industrial futuristic scene."
+  kids_storybook: "Whimsical children's book illustration, cute fairy tale style, soft pastel colors, hand-drawn look, magical warm lighting, fantasy world."

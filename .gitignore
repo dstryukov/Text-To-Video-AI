@@ -3,3 +3,7 @@ venv/
 __pycache__/
 .DS_Store
 .env
+output/
+rendered_video.mp4
+audio_tts.wav
+test_scenes.json

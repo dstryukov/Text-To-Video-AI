@@ -1,16 +1,11 @@
 from utility.config import get_config
-
+from utility.tts.tts_engine import generate_tts
 
 async def generate_audio(text, outputFilename):
+    """
+    Асинхронная обертка для обратной совместимости, которая вызывает 
+    синхронный метод генерации озвучки из tts_engine.py.
+    """
     config = get_config()
-    tts_provider = config.get_tts_provider()
-    voice = config.get_tts_voice()
-    
-    if tts_provider == 'edgetts':
-        from utility.tts.edgetts_tts import generate_audio as edgetts_audio
-        await edgetts_audio(text, outputFilename, voice)
-    elif tts_provider == 'elevenlabs':
-        from utility.tts.elevenlabs_tts import generate_audio as elevenlabs_audio
-        await elevenlabs_audio(text, outputFilename, voice)
-    else:
-        raise ValueError(f"Unknown TTS provider: {tts_provider}")
+    tts_config = config.get_tts_config()
+    generate_tts(text, outputFilename, tts_config)

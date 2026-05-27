@@ -52,3 +52,4 @@ typing_extensions==4.12.1
 urllib3==2.2.1
 whisper-timestamped==1.15.4
 yarl==1.9.4
+PyYAML>=6.0
