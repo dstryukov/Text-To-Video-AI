@@ -295,8 +295,20 @@ def generate_f5_tts(text: str, output_path: str, config: dict):
     ref_text = config.get('reference_text', '')
     use_clone = config.get('use_voice_clone', True)
     speed = float(f5_cfg.get('speed', 1.0))
-    nfe = int(f5_cfg.get('nfe_step', 32))
     cfg = float(f5_cfg.get('cfg_strength', 2.0))
+    
+    # Priority resolution for F5 nfe_step:
+    # Backend default -> Quality Preset -> Explicit Config / CLI Override
+    nfe = 32
+    quality_preset_name = config.get('quality_preset', 'balanced')
+    quality_presets = get_config().get_tts_quality_presets()
+    preset_cfg = quality_presets.get(quality_preset_name, {}).get('f5_tts', {})
+    if 'nfe_step' in preset_cfg:
+        nfe = int(preset_cfg['nfe_step'])
+        
+    user_nfe = get_config().yaml_config.get('tts', {}).get('f5_tts', {}).get('nfe_step')
+    if user_nfe is not None:
+        nfe = int(user_nfe)
     device = f5_cfg.get('device', 'cuda')
     dtype = f5_cfg.get('dtype', 'float16')
     
@@ -617,7 +629,7 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None) -> str:
         elif selected_backend == "audio_file":
             return use_existing_audio_file(o_path, config_dict)
         elif selected_backend == "none":
-            return create_silent_audio(t_text, o_path, config_dict)
+            return generate_silence(o_path, t_text, sample_rate)
         else:
             raise ValueError(f"Unknown TTS backend: {selected_backend}")
             
@@ -643,7 +655,7 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None) -> str:
             execute_with_fallback(processed_text, output_path)
         except Exception as e:
             print(f"Error copying audio file: {e}. Generating silent placeholder.")
-            create_silent_audio(processed_text, output_path, config_dict)
+            generate_silence(output_path, processed_text, sample_rate)
     else:
         chunks = split_text_into_chunks(processed_text, max_chars)
         if len(chunks) == 1:
@@ -651,7 +663,7 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None) -> str:
                 execute_with_fallback(processed_text, output_path)
             except Exception as e:
                 print(f"Error synthesizing audio: {e}. Generating silent placeholder.")
-                create_silent_audio(processed_text, output_path, config_dict)
+                generate_silence(output_path, processed_text, sample_rate)
         else:
             print(f"Splitting text into {len(chunks)} chunks due to max_chars_per_chunk limit ({max_chars}).")
             temp_dir = tempfile.mkdtemp()
@@ -680,7 +692,7 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None) -> str:
                 
             except Exception as e:
                 print(f"Failed to synthesize or concatenate text chunks: {e}. Generating silent placeholder.")
-                create_silent_audio(processed_text, output_path, config_dict)
+                generate_silence(output_path, processed_text, sample_rate)
             finally:
                 # Очистка временных файлов
                 try:
@@ -704,4 +716,12 @@ def generate_tts(text: str, output_path: str, config_dict: dict = None) -> str:
         
     postprocess_audio(output_path, output_path, pp_config)
     
+    if config_dict.get('unload_tts_model_after_generation', True):
+        global _silero_model
+        if _silero_model is not None:
+            print("Unloading Silero TTS model from cache...")
+            from utility.memory import clear_memory
+            _silero_model = None
+            clear_memory()
+            
     return output_path

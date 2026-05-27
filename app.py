@@ -12,6 +12,7 @@ from utility.script.script_generator import generate_script
 from utility.tts.tts_engine import generate_tts
 from utility.video.visual_prompt_generator import generate_visual_prompts
 from utility.render.render_engine import render_video_from_scenes
+from utility.memory import clear_memory
 
 def main():
     parser = argparse.ArgumentParser(description="Universal AI Video Generation Pipeline")
@@ -73,6 +74,21 @@ def main():
                         help="Override TTS speed (float or string preset)")
     parser.add_argument("--emotion", type=str, default=None, 
                         help="Override TTS emotion (neutral, energetic, calm, etc.)")
+    parser.add_argument("--tts-quality", type=str, default=None,
+                        choices=["draft", "balanced", "high"],
+                        help="Override TTS quality preset (draft, balanced, high)")
+    parser.add_argument("--clear-memory-after-tts", dest="clear_memory_after_tts",
+                        action="store_true", default=None,
+                        help="Clear GPU/system memory after TTS generation")
+    parser.add_argument("--no-clear-memory-after-tts", dest="clear_memory_after_tts",
+                        action="store_false",
+                        help="Do not clear memory after TTS generation")
+    parser.add_argument("--unload-tts-model", dest="unload_tts_model",
+                        action="store_true", default=None,
+                        help="Unload TTS model from memory after generation")
+    parser.add_argument("--no-unload-tts-model", dest="unload_tts_model",
+                        action="store_false",
+                        help="Keep TTS model in memory after generation")
     
     args = parser.parse_args()
     
@@ -147,6 +163,12 @@ def main():
         config.yaml_config.setdefault('tts', {})['speed'] = speed_val
     if args.emotion:
         config.yaml_config.setdefault('tts', {})['emotion'] = args.emotion
+    if args.tts_quality:
+        config.yaml_config.setdefault('tts', {})['quality_preset'] = args.tts_quality
+    if args.clear_memory_after_tts is not None:
+        config.yaml_config.setdefault('tts', {})['clear_memory_after_tts'] = args.clear_memory_after_tts
+    if args.unload_tts_model is not None:
+        config.yaml_config.setdefault('tts', {})['unload_tts_model_after_generation'] = args.unload_tts_model
         
     project_name = config.get_project_name()
     output_dir = os.path.join("output", project_name)
@@ -319,10 +341,18 @@ def main():
             print(f"Error concatenating audio clips: {e}")
             if audio_paths:
                 shutil.copy2(audio_paths[0], master_audio_path)
+
+    # 5. Очистка памяти после TTS
+    if tts_config.get('clear_memory_after_tts', True):
+        print("\n--- Clearing memory after TTS stage ---")
+        clear_memory()
             
     # 6. Запуск сборки видео (Рендеринг)
     print("\n--- Starting Video Assembly (Render Engine) ---")
     final_video_path = os.path.join(output_dir, "rendered_video.mp4")
+    
+    # Очищаем память перед визуальным рендерингом для освобождения VRAM
+    clear_memory()
     
     render_video_from_scenes(master_audio_path, scenes_json_path, final_video_path)
     

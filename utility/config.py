@@ -96,6 +96,10 @@ class Config:
             'backend': 'silero',
             'fallback_backend': 'silero',
             'mode': 'per_scene',
+            'quality_preset': 'balanced',
+            'clear_memory_after_tts': True,
+            'unload_tts_model_after_generation': True,
+            'run_tts_before_visuals': True,
             'language': 'ru',
             'voice': 'default',
             'speed': 1.0,
@@ -162,6 +166,13 @@ class Config:
             merged['backend'] = os.getenv('TTS_PROVIDER')
             
         return merged
+
+    def get_tts_quality_presets(self) -> dict:
+        return self.yaml_config.get('tts_quality_presets', {})
+
+    def get_tts_quality_preset(self, name: str) -> dict:
+        return self.get_tts_quality_presets().get(name, {})
+
 
     def get_audio_postprocess_config(self) -> dict:
         default_pp = {

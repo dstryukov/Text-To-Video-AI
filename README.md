@@ -14,8 +14,10 @@ https://github.com/user-attachments/assets/1e440ace-8560-4e12-850e-c532740711e7
 
 - **AI-Powered Script Generation** - Automatically generates engaging scripts from any topic
 - **Multiple LLM Providers** - Choose from OpenAI, Groq, or Google Gemini
-- **Text-to-Speech** - Natural-sounding voiceovers with EdgeTTS (free) or ElevenLabs
-- **Automatic B-Roll** - Fetches relevant background videos from Pexels
+- **Modern TTS Pipeline** - Voice cloning via F5-TTS, Fish-Speech, CosyVoice; Silero as free fallback
+- **Quality Presets** - draft / balanced / high quality for TTS (controls NFE steps for F5-TTS)
+- **Visual Backends** - ComfyUI, local API, image folder, stock video (Pexels), or none
+- **Memory Management** - Automatic GPU/system memory cleanup between TTS and visual stages
 - **Customizable Captions** - Full control over font, color, position, and styling
 - **Multiple Orientations** - Portrait (9:16) for shorts or Landscape (16:9) for traditional video
 - **Speech-to-Text** - Accurate caption timing with Whisper or Deepgram
@@ -52,8 +54,17 @@ See installation instructions below.
 git clone https://github.com/SamurAIGPT/Text-To-Video-AI.git
 cd Text-To-Video-AI
 
-# Install dependencies
+# Install base dependencies
 pip install -r requirements.txt
+
+# (Optional) Install F5-TTS for voice cloning
+pip install -r requirements-tts-f5.txt
+
+# (Optional) Install Fish-Speech
+pip install -r requirements-tts-fish.txt
+
+# (Optional) Install CosyVoice
+pip install -r requirements-tts-cosyvoice.txt
 
 # Create your configuration file
 cp .env.example .env
@@ -90,12 +101,11 @@ All settings are configured via the `.env` file. Copy `.env.example` to get star
 # LLM Provider: openai, groq, or gemini
 LLM_PROVIDER=openai
 
-# Text-to-Speech: edgetts (free) or elevenlabs
-TTS_PROVIDER=edgetts
-
 # Speech-to-Text: whisper (free) or deepgram
 STT_PROVIDER=whisper
 ```
+
+TTS backend is configured in `config.yaml` under the `tts:` section (see below).
 
 ### Video Settings
 
@@ -124,24 +134,50 @@ CAPTION_POSITION=bottom_center
 
 **Font Color Options:** `white`, `yellow`, `cyan`, `red`, `green`, `blue`, `magenta`
 
-### Voice Configuration
+### TTS Configuration
 
-**EdgeTTS (Free):**
-```env
-EDGETTS_VOICE=en-AU-WilliamNeural
+TTS is configured in `config.yaml`. Available backends:
+
+| Backend | Voice Cloning | Free/Local | Notes |
+|---------|:---:|:---:|-------|
+| `f5_tts` | ✅ | ✅ | Best quality, requires GPU |
+| `fish_speech` | ✅ | ✅ | Alternative voice cloning |
+| `cosyvoice` | ✅ | ✅ | Zero-shot cloning |
+| `local_tts_api` | ✅ | ✅ | Any HTTP TTS server |
+| `silero` | ❌ | ✅ | Lightweight CPU fallback |
+| `audio_file` | — | ✅ | Use pre-recorded audio |
+| `none` | — | ✅ | Silent placeholder |
+
+**Quality presets** (for F5-TTS):
+- `draft` — nfe_step=8, fastest
+- `balanced` — nfe_step=16, default
+- `high` — nfe_step=32, best quality
+
+### Verified CLI Commands
+
+**F5-TTS draft (fast preview, no visuals):**
+```bash
+python app.py "Your topic" --tts-backend f5_tts --tts-mode full_script --tts-quality draft --reference-audio voices/reference.wav --backend none
 ```
 
-Popular voices:
-- `en-US-ChristopherNeural` - American male
-- `en-US-JennyNeural` - American female
-- `en-GB-RyanNeural` - British male
-- `en-GB-SoniaNeural` - British female
-- `en-AU-WilliamNeural` - Australian male
+**F5-TTS balanced (with image folder visuals):**
+```bash
+python app.py "Your topic" --tts-backend f5_tts --tts-mode full_script --tts-quality balanced --reference-audio voices/reference.wav --backend image_folder
+```
 
-**ElevenLabs:**
-```env
-ELEVENLABS_API_KEY=your_key
-ELEVENLABS_VOICE_ID=your_voice_id
+**Silero fallback (CPU, no GPU needed):**
+```bash
+python app.py "Your topic" --tts-backend silero --tts-mode per_scene --backend none
+```
+
+### Memory Management CLI
+
+```bash
+# Disable memory cleanup after TTS (keep model loaded)
+python app.py "Topic" --tts-backend f5_tts --no-clear-memory-after-tts --no-unload-tts-model
+
+# Force cleanup (default behavior)
+python app.py "Topic" --tts-backend f5_tts --clear-memory-after-tts --unload-tts-model
 ```
 
 ## Tutorials

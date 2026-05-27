@@ -12,6 +12,11 @@ tts:
   backend: "silero"              # f5_tts | fish_speech | cosyvoice | local_tts_api | silero | audio_file | none
   fallback_backend: "silero"
   mode: "per_scene"              # per_scene | full_script
+  quality_preset: "balanced"     # draft | balanced | high
+
+  clear_memory_after_tts: true
+  unload_tts_model_after_generation: true
+  run_tts_before_visuals: true
 
   language: "ru"
   voice: "default"
@@ -364,3 +369,16 @@ comfyui:
     lora_strength_model: "10.inputs.strength_model"
     lora_strength_clip: "10.inputs.strength_clip"
     save_image_prefix: "9.inputs.filename_prefix"
+
+# Пресеты качества для TTS (например, F5-TTS)
+tts_quality_presets:
+  draft:
+    f5_tts:
+      nfe_step: 8
+  balanced:
+    f5_tts:
+      nfe_step: 16
+  high:
+    f5_tts:
+      nfe_step: 32
+
