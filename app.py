@@ -22,14 +22,53 @@ def main():
     parser.add_argument("--preset", type=str, default=None, 
                         help="Override style preset (cinematic_realistic, documentary, etc.)")
     parser.add_argument("--backend", type=str, default=None, 
-                        help="Override visual backend (none, sdxl_turbo, a1111, stock_video, etc.)")
+                        help="Override visual backend (none, comfyui, local_api, image_folder)")
     parser.add_argument("--aspect", type=str, default=None, 
                         help="Override aspect ratio (9:16, 16:9, 1:1)")
+    
+    # Новые CLI-аргументы
+    parser.add_argument("--model-preset", type=str, default=None, 
+                        help="Override model preset (flux_schnell_fp8, z_image_turbo_gguf, etc.)")
+    parser.add_argument("--acceleration", type=str, default=None, 
+                        help="Override acceleration mode (schnell, turbo, distilled, etc.)")
+    parser.add_argument("--image-width", type=int, default=None, 
+                        help="Override image generation width (e.g. 576)")
+    parser.add_argument("--image-height", type=int, default=None, 
+                        help="Override image generation height (e.g. 1024)")
+    parser.add_argument("--steps", type=int, default=None, 
+                        help="Override generation steps")
+    parser.add_argument("--guidance", type=float, default=None, 
+                        help="Override guidance scale")
+    parser.add_argument("--seed", type=int, default=None, 
+                        help="Override seed (-1 for random)")
+    parser.add_argument("--sampler", type=str, default=None, 
+                        help="Override sampler name (e.g. euler)")
+    parser.add_argument("--scheduler", type=str, default=None, 
+                        help="Override scheduler name (e.g. simple)")
+    parser.add_argument("--lora-preset", type=str, default=None, 
+                        help="Override LoRA preset (none, cinematic, photoreal, anime)")
+    parser.add_argument("--lora-strength", type=float, default=None, 
+                        help="Override LoRA strength")
+    parser.add_argument("--hf-token-env", type=str, default=None, 
+                        help="Override Hugging Face token environment variable name")
+    parser.add_argument("--config", type=str, default=None, 
+                        help="Path to custom config YAML file to load")
     
     args = parser.parse_args()
     
     # 1. Загрузка конфигурации
     config = get_config()
+    
+    # Если передан кастомный файл конфигурации, загружаем его поверх дефолтного
+    if args.config:
+        print(f"Loading custom configuration file: {args.config}")
+        try:
+            import yaml
+            with open(args.config, 'r', encoding='utf-8') as f:
+                custom_config = yaml.safe_load(f) or {}
+                config.yaml_config.update(custom_config)
+        except Exception as e:
+            print(f"Error loading custom config {args.config}: {e}")
     
     # Применение переопределений командной строки в кэш конфигурации
     if args.preset:
@@ -38,6 +77,30 @@ def main():
         config.yaml_config.setdefault('render', {})['visual_backend'] = args.backend
     if args.aspect:
         config.yaml_config['aspect_ratio'] = args.aspect
+    if args.model_preset:
+        config.yaml_config.setdefault('render', {})['model_preset'] = args.model_preset
+    if args.acceleration:
+        config.yaml_config.setdefault('render', {})['acceleration_mode'] = args.acceleration
+    if args.image_width is not None:
+        config.yaml_config.setdefault('render', {})['image_width'] = args.image_width
+    if args.image_height is not None:
+        config.yaml_config.setdefault('render', {})['image_height'] = args.image_height
+    if args.steps is not None:
+        config.yaml_config.setdefault('render', {})['steps'] = args.steps
+    if args.guidance is not None:
+        config.yaml_config.setdefault('render', {})['guidance_scale'] = args.guidance
+    if args.seed is not None:
+        config.yaml_config.setdefault('render', {})['seed'] = args.seed
+    if args.sampler:
+        config.yaml_config.setdefault('render', {})['sampler'] = args.sampler
+    if args.scheduler:
+        config.yaml_config.setdefault('render', {})['scheduler'] = args.scheduler
+    if args.lora_preset:
+        config.yaml_config.setdefault('render', {})['lora_preset'] = args.lora_preset
+    if args.lora_strength is not None:
+        config.yaml_config.setdefault('render', {})['lora_strength'] = args.lora_strength
+    if args.hf_token_env:
+        config.yaml_config.setdefault('huggingface', {})['token_env'] = args.hf_token_env
         
     project_name = config.get_project_name()
     output_dir = os.path.join("output", project_name)
@@ -46,7 +109,10 @@ def main():
     print(f"--- Starting Pipeline for Project: {project_name} ---")
     print(f"Output directory: {output_dir}")
     print(f"Aspect ratio: {config.get_aspect_ratio()}")
-    print(f"Visual backend: {config.get_render_config().get('visual_backend')}")
+    
+    render_cfg = config.get_render_config()
+    print(f"Visual backend: {render_cfg.get('visual_backend')}")
+    print(f"Model preset: {render_cfg.get('model_preset')}")
     print(f"Style preset: {config.get_visual_generator_config().get('style_preset')}")
     
     # 2. Определение входных данных (сценарий или тема)

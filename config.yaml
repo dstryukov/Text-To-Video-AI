@@ -1,26 +1,16 @@
 # Универсальные настройки пайплайна генерации видео
 
-# Название проекта (будет создана папка output/project_name/)
-project_name: "space_facts"
-
-# Соотношение сторон видео:
-#   - portrait (9:16) (YouTube Shorts, TikTok, Instagram Reels)
-#   - landscape (16:9) (Традиционный горизонтальный ролик)
-#   - square (1:1) (Квадратный ролик)
+project_name: "ai_video_project"
 aspect_ratio: "9:16"
 
 # Провайдер LLM для генерации сценария и промптов (openai, groq, gemini)
 llm_provider: "gemini"
 llm_model: "gemini-2.5-flash"
 
-# 1. Настройки Text-To-Speech (TTS)
+# Настройки озвучки (TTS)
 tts:
-  # Бэкенд озвучки: silero | local_api | none
   backend: "silero"
-  
-  # Язык озвучки (по умолчанию русский)
   language: "ru"
-  
   # Голос (для Silero: aidar, baya, kseniya, xenia, eugene)
   voice: "baya"
   
@@ -28,35 +18,41 @@ tts:
   #   - Число (например: 1.0, 1.2, 0.8)
   #   - Строковый пресет (x-slow, slow, medium, fast, x-fast)
   speed: "medium"
-  
-  # Частота дискретизации (8000, 24000, 48000)
   sample_rate: 24000
-  
-  # Формат аудиофайла (wav, mp3)
   format: "wav"
-  
-  # Выполнять ли нормализацию текста (чистка разметки, преобразование спецсимволов)
   normalize_text: true
-  
-  # Настройка локального API озвучки (используется, если backend=local_api)
   local_api_url: "http://localhost:8010/tts"
 
-# 2. Настройки Visual Prompt Generator
+# Настройки генератора визуальных промптов
 visual_generator:
-  # Режим генератора визуалов:
-  #   - image_prompts: детальные промпты для генераторов картинок (SD, Midjourney)
-  #   - video_prompts: промпты для генераторов видео (Runway, Sora)
-  #   - stock_keywords: ключевые слова на английском для поиска стоковых видео
   mode: "image_prompts"
-  
-  # Пресет стиля из списка ниже
   style_preset: "cinematic_realistic"
 
-# 3. Настройки Render Engine
+# Настройки рендеринга и генерации визуалов по умолчанию
 render:
-  # Бэкенд визуализации: sdxl_turbo | comfyui | a1111 | local_api | image_folder | stock_video | none
-  visual_backend: "sdxl_turbo"
-  
+  # Бэкенд визуализации: comfyui | local_api | image_folder | none
+  visual_backend: "comfyui"
+  model_preset: "flux_schnell_fp8"
+  acceleration_mode: "schnell"    # none | turbo | schnell | lcm | lightning | hyper | distilled
+
+  # Разрешение генерации картинок (рекомендуется пониженное для экономии VRAM)
+  image_width: 576
+  image_height: 1024
+
+  # Итоговое разрешение видео
+  final_width: 1080
+  final_height: 1920
+
+  steps: 4
+  guidance_scale: 0.0
+  seed: -1
+  sampler: "euler"
+  scheduler: "simple"
+
+  # Настройки LoRA
+  lora_preset: "none"
+  lora_strength: 0.7
+
   # Пресет анимации камеры для статических изображений:
   #   - none (без движения)
   #   - slow_zoom_in (плавный наезд)
@@ -65,30 +61,236 @@ render:
   #   - pan_right (плавное панорамирование вправо)
   #   - handheld_light (легкое покачивание камеры с рук)
   motion_preset: "slow_zoom_in"
-  
-  # Включить субтитры (true/false)
   captions_enabled: true
-  
-  # URL для локальных API генерации изображений
-  local_image_api_url: "http://127.0.0.1:7860/sdapi/v1/txt2img"
-  
-  # Путь для бэкенда image_folder
+
+  # Настройки бэкендов
+  comfyui_url: "http://127.0.0.1:8188"
+  comfyui_workflow_path: "workflows/flux_schnell_fp8_4step.json"
+
+  local_image_api_url: "http://127.0.0.1:8000/txt2img"
   image_folder_path: "input_images"
 
-# Субтитры и их стилизация
+  # Настройки отказоустойчивости (Fallback) и очистки кэша
+  fallback_backend: "image_folder"
+  fallback_to_black: true
+  clear_cuda_cache_between_scenes: true
+
+# Настройки авторизации Hugging Face (для Colab)
+huggingface:
+  token_env: "HF_TOKEN"
+  use_auth_token: true
+
+# Настройки отображения субтитров
 captions:
   font_size: 90
-  font_color: "white"             # white, yellow, cyan, red, green, blue, magenta
+  font_color: "white"
   font_face: "Arial-Bold"
   stroke_width: 3
   stroke_color: "black"
-  position: "bottom_center"       # center, top, bottom, bottom_center, bottom_left, bottom_right
+  position: "bottom_center"
 
-# 4. Пресеты стилей для визуальных промптов (передаются в LLM при генерации)
+# Художественные пресеты стилей для генерации промптов
 style_presets:
-  cinematic_realistic: "Cinematic style, highly detailed, realistic texture, 8k resolution, dramatic volumetric lighting, photorealistic, shot on 35mm lens, shallow depth of field."
-  documentary: "Documentary style photography, authentic, raw footage look, natural lighting, journalistic, real-world context, candid camera shot."
-  luxury_commercial: "Sleek commercial video, high-end production, premium luxury feel, extremely clean, professional studio lighting, perfect color grading, minimal background."
-  educational_clean: "Clean educational infographic style, modern vector graphics, minimalist, flat design, bright background, easy to read, simple and clear shapes."
-  dark_dystopian: "Dark dystopian mood, cinematic dramatic shadows, moody atmospheric, gritty cyberpunk details, neon highlights in darkness, industrial futuristic scene."
-  kids_storybook: "Whimsical children's book illustration, cute fairy tale style, soft pastel colors, hand-drawn look, magical warm lighting, fantasy world."
+  cinematic_realistic: "Cinematic realistic style, detailed composition, realistic lighting, professional video frame, high detail, natural textures."
+  documentary: "Documentary style, authentic real-world look, natural lighting, journalistic, realistic details."
+  luxury_commercial: "Premium commercial look, clean elegant composition, polished lighting, high-end advertising style."
+  educational_clean: "Clean educational visual style, minimal background, clear subject, readable composition."
+  dark_dystopian: "Dark near-future atmosphere, cinematic shadows, cold lighting, subtle technology, unsettling mood."
+  kids_storybook: "Warm illustrated storybook style, soft colors, friendly characters, cozy atmosphere."
+
+# Пресеты моделей для ComfyUI
+model_presets:
+  flux_schnell_fp8:
+    backend: "comfyui"
+    workflow: "workflows/flux_schnell_fp8_4step.json"
+    quantization: "fp8"
+    acceleration_mode: "schnell"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 4
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  flux_schnell_gguf:
+    backend: "comfyui"
+    workflow: "workflows/flux_schnell_gguf_4step.json"
+    quantization: "gguf"
+    acceleration_mode: "schnell"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 4
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  z_image_turbo_fp8:
+    backend: "comfyui"
+    workflow: "workflows/z_image_turbo_fp8_6step.json"
+    quantization: "fp8"
+    acceleration_mode: "turbo"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  z_image_turbo_gguf:
+    backend: "comfyui"
+    workflow: "workflows/z_image_turbo_gguf_6step.json"
+    quantization: "gguf"
+    acceleration_mode: "turbo"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  flux_klein_fp8:
+    backend: "comfyui"
+    workflow: "workflows/flux_klein_fp8_fast.json"
+    quantization: "fp8"
+    acceleration_mode: "distilled"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  flux_klein_gguf:
+    backend: "comfyui"
+    workflow: "workflows/flux_klein_gguf_fast.json"
+    quantization: "gguf"
+    acceleration_mode: "distilled"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  qwen_image_turbo_fp8:
+    backend: "comfyui"
+    workflow: "workflows/qwen_image_turbo_fp8.json"
+    quantization: "fp8"
+    acceleration_mode: "turbo"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  qwen_image_turbo_gguf:
+    backend: "comfyui"
+    workflow: "workflows/qwen_image_turbo_gguf.json"
+    quantization: "gguf"
+    acceleration_mode: "turbo"
+    recommended_width: 576
+    recommended_height: 1024
+    recommended_steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+# Пресеты параметров шагов и сэмплеров (ускорение генерации)
+acceleration_presets:
+  schnell_4step:
+    acceleration_mode: "schnell"
+    steps: 4
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  turbo_4step:
+    acceleration_mode: "turbo"
+    steps: 4
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  turbo_6step:
+    acceleration_mode: "turbo"
+    steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  distilled_6step:
+    acceleration_mode: "distilled"
+    steps: 6
+    guidance_scale: 0.0
+    sampler: "euler"
+    scheduler: "simple"
+
+  lcm_6step:
+    acceleration_mode: "lcm"
+    steps: 6
+    guidance_scale: 1.0
+    sampler: "lcm"
+    scheduler: "sgm_uniform"
+    lora_required: true
+
+  lightning_4step:
+    acceleration_mode: "lightning"
+    steps: 4
+    guidance_scale: 1.0
+    sampler: "euler"
+    scheduler: "sgm_uniform"
+    lora_required: true
+
+  hyper_8step:
+    acceleration_mode: "hyper"
+    steps: 8
+    guidance_scale: 1.0
+    sampler: "euler"
+    scheduler: "sgm_uniform"
+    lora_required: true
+
+# Пресеты LoRA моделей
+lora_presets:
+  none:
+    enabled: false
+
+  cinematic:
+    enabled: true
+    lora_name: "cinematic_lora.safetensors"
+    strength_model: 0.6
+    strength_clip: 0.6
+
+  photoreal:
+    enabled: true
+    lora_name: "photoreal_lora.safetensors"
+    strength_model: 0.5
+    strength_clip: 0.5
+
+  anime:
+    enabled: true
+    lora_name: "anime_lora.safetensors"
+    strength_model: 0.7
+    strength_clip: 0.7
+
+# Динамический маппинг нод ComfyUI
+comfyui:
+  url: "http://127.0.0.1:8188"
+  workflow_path: "workflows/flux_schnell_fp8_4step.json"
+  timeout_sec: 300
+  poll_interval_sec: 2
+
+  node_map:
+    positive_prompt: "6.inputs.text"
+    negative_prompt: "7.inputs.text"
+    width: "5.inputs.width"
+    height: "5.inputs.height"
+    seed: "3.inputs.seed"
+    steps: "3.inputs.steps"
+    cfg: "3.inputs.cfg"
+    sampler: "3.inputs.sampler_name"
+    scheduler: "3.inputs.scheduler"
+    lora_name: "10.inputs.lora_name"
+    lora_strength_model: "10.inputs.strength_model"
+    lora_strength_clip: "10.inputs.strength_clip"
+    save_image_prefix: "9.inputs.filename_prefix"

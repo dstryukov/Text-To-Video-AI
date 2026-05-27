@@ -17,9 +17,6 @@ except ImportError:
 
 from utility.config import get_config
 
-# Локальный кэш для пайплайна SDXL Turbo
-_sdxl_pipeline = None
-
 # ----------------- СОВМЕСТИМОСТЬ MOVIEPY V1 / V2 -----------------
 
 def set_clip_duration(clip, duration):
@@ -91,41 +88,263 @@ def search_program(program_name):
 def get_program_path(program_name):
     return search_program(program_name)
 
-# ----------------- БЭКЕНДЫ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЙ -----------------
-
-def generate_sdxl_turbo(prompt, negative_prompt, output_path, width=512, height=512):
-    """Генерация изображения локально через SDXL Turbo."""
-    global _sdxl_pipeline
+def clear_cuda_memory():
+    """Очистка кэша CUDA и вызов сборщика мусора для предотвращения OOM."""
+    import gc
+    gc.collect()
     try:
         import torch
-        from diffusers import AutoPipelineForText2Image
-        
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        
-        if _sdxl_pipeline is None:
-            print("Loading SDXL Turbo pipeline on device:", device)
-            _sdxl_pipeline = AutoPipelineForText2Image.from_pretrained(
-                "stabilityai/sdxl-turbo",
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                variant="fp16" if device == "cuda" else None
-            )
-            _sdxl_pipeline.to(device)
-            
-        print(f"Generating image via SDXL Turbo for prompt: {prompt[:40]}...")
-        image = _sdxl_pipeline(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            num_inference_steps=1,
-            guidance_scale=0.0,
-            width=width,
-            height=height
-        ).images[0]
-        image.save(output_path)
-        return output_path
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
+            print("CUDA memory and cache cleared successfully.")
     except Exception as e:
-        print(f"SDXL Turbo generation failed: {e}")
-        print("Please ensure 'diffusers', 'transformers' and 'accelerate' are installed.")
+        pass
+
+# ----------------- БЭКЕНДЫ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЙ -----------------
+
+def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, config):
+    """
+    Генерация изображения через REST API ComfyUI с динамическим маппингом параметров.
+    """
+    comfyui_cfg = config.get_comfyui_config()
+    render_cfg = config.get_render_config()
+    
+    comfyui_url = comfyui_cfg.get('url', 'http://127.0.0.1:8188').rstrip('/')
+    
+    model_preset_name = render_cfg.get('model_preset')
+    model_preset = config.get_model_preset(model_preset_name) if model_preset_name else {}
+    
+    # 1. Определение файла воркфлоу
+    workflow_path = model_preset.get('workflow') or render_cfg.get('comfyui_workflow_path') or comfyui_cfg.get('workflow_path')
+    if not workflow_path:
+        raise RuntimeError("Workflow path is not specified in config.")
+        
+    full_workflow_path = os.path.join(os.getcwd(), workflow_path)
+    if not os.path.exists(full_workflow_path):
+        raise FileNotFoundError(f"Workflow file not found: {full_workflow_path}")
+        
+    print(f"Loading ComfyUI workflow template: {full_workflow_path}")
+    with open(full_workflow_path, 'r', encoding='utf-8') as f:
+        workflow = json.load(f)
+        
+    node_map = comfyui_cfg.get('node_map', {})
+    
+    # 2. Вычисление параметров генерации
+    steps = render_cfg.get('steps') or model_preset.get('recommended_steps', 4)
+    guidance = render_cfg.get('guidance_scale')
+    if guidance is None:
+        guidance = model_preset.get('guidance_scale', 0.0)
+    sampler = render_cfg.get('sampler') or model_preset.get('sampler', 'euler')
+    scheduler = render_cfg.get('scheduler') or model_preset.get('scheduler', 'simple')
+    
+    seed = render_cfg.get('seed', -1)
+    if seed == -1:
+        import random
+        seed = random.randint(1, 1000000000000000)
+        
+    # Формируем словарь параметров для подстановки
+    params = {
+        'positive_prompt': prompt,
+        'negative_prompt': negative_prompt,
+        'width': width,
+        'height': height,
+        'seed': seed,
+        'steps': steps,
+        'cfg': guidance,
+        'sampler': sampler,
+        'scheduler': scheduler,
+        'save_image_prefix': f"t2v_{int(time.time())}"
+    }
+    
+    # Обработка LoRA
+    lora_preset_name = render_cfg.get('lora_preset', 'none')
+    if lora_preset_name and lora_preset_name != 'none':
+        lora_preset = config.get_lora_preset(lora_preset_name)
+        if lora_preset and lora_preset.get('enabled', False):
+            params['lora_name'] = lora_preset.get('lora_name')
+            lora_strength = render_cfg.get('lora_strength')
+            if lora_strength is not None:
+                params['lora_strength_model'] = lora_strength
+                params['lora_strength_clip'] = lora_strength
+            else:
+                params['lora_strength_model'] = lora_preset.get('strength_model', 0.7)
+                params['lora_strength_clip'] = lora_preset.get('strength_clip', 0.7)
+        else:
+            params['lora_strength_model'] = 0.0
+            params['lora_strength_clip'] = 0.0
+    else:
+        params['lora_strength_model'] = 0.0
+        params['lora_strength_clip'] = 0.0
+
+    def set_workflow_value(wf, path, val):
+        try:
+            parts = path.split('.')
+            current = wf
+            for part in parts[:-1]:
+                if isinstance(current, dict) and part in current:
+                    current = current[part]
+                else:
+                    return False
+            last = parts[-1]
+            if last in ['width', 'height', 'steps', 'seed']:
+                try:
+                    val = int(val)
+                except:
+                    pass
+            elif last in ['cfg', 'strength_model', 'strength_clip']:
+                try:
+                    val = float(val)
+                except:
+                    pass
+            current[last] = val
+            return True
+        except Exception as e:
+            print(f"Warning: Could not set path {path} to {val}: {e}")
+            return False
+
+    # 3. Подстановка параметров в воркфлоу по нод-мапе
+    for key, val in params.items():
+        if key in node_map:
+            path = node_map[key]
+            set_workflow_value(workflow, path, val)
+            
+    # 4. Отправка POST запроса на запуск
+    p = {"prompt": workflow}
+    response = requests.post(f"{comfyui_url}/prompt", json=p, timeout=30)
+    response.raise_for_status()
+    resp_data = response.json()
+    prompt_id = resp_data.get('prompt_id')
+    if not prompt_id:
+        raise RuntimeError("ComfyUI response did not contain prompt_id")
+        
+    print(f"Prompt queued successfully in ComfyUI (prompt_id: {prompt_id}). Polling status...")
+    
+    # 5. Опрос готовности
+    timeout_sec = comfyui_cfg.get('timeout_sec', 300)
+    poll_interval_sec = comfyui_cfg.get('poll_interval_sec', 2)
+    start_time = time.time()
+    
+    history_data = None
+    while time.time() - start_time < timeout_sec:
+        history_resp = requests.get(f"{comfyui_url}/history/{prompt_id}")
+        if history_resp.status_code == 200:
+            history_json = history_resp.json()
+            if prompt_id in history_json:
+                history_data = history_json[prompt_id]
+                break
+        time.sleep(poll_interval_sec)
+        
+    if not history_data:
+        raise TimeoutError(f"ComfyUI generation timed out after {timeout_sec}s for prompt_id: {prompt_id}")
+        
+    status = history_data.get('status', {})
+    if status.get('completed') is not True:
+        messages = status.get('messages', [])
+        raise RuntimeError(f"ComfyUI prompt run was not completed successfully. Messages: {messages}")
+        
+    # 6. Извлечение результатов
+    outputs = history_data.get('outputs', {})
+    image_info = None
+    for node_id, output in outputs.items():
+        if 'images' in output:
+            for img in output['images']:
+                image_info = img
+                break
+        if image_info:
+            break
+            
+    if not image_info:
+        raise RuntimeError(f"ComfyUI history did not contain generated images. History: {history_data}")
+        
+    filename = image_info.get('filename')
+    subfolder = image_info.get('subfolder', '')
+    img_type = image_info.get('type', 'output')
+    
+    # 7. Скачивание картинки
+    view_url = f"{comfyui_url}/view?filename={filename}&subfolder={subfolder}&type={img_type}"
+    print(f"Downloading generated image: {view_url}")
+    img_resp = requests.get(view_url, timeout=30)
+    img_resp.raise_for_status()
+    
+    with open(output_path, 'wb') as f:
+        f.write(img_resp.content)
+        
+    print(f"Saved ComfyUI image to: {output_path}")
+    return output_path
+
+
+def generate_local_api_image(prompt, negative_prompt, output_path, width=512, height=512, url="http://127.0.0.1:8000/txt2img"):
+    """
+    Генерация через кастомный локальный API. 
+    Поддерживает: бинарный поток (raw bytes), JSON с base64 (включая списки) и JSON с URL картинки.
+    """
+    payload = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height
+    }
+    try:
+        print(f"Sending generation request to local API: {url}...")
+        response = requests.post(url, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        # 1. Проверяем Content-Type на картинку
+        content_type = response.headers.get('content-type', '').lower()
+        if 'image/' in content_type:
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            return output_path
+            
+        # 2. Иначе пробуем распарсить JSON
+        try:
+            r = response.json()
+            
+            # Поиск base64 в типичных ключах
+            b64_data = None
+            for key in ['image', 'images', 'base64', 'b64']:
+                if key in r:
+                    val = r[key]
+                    if isinstance(val, list) and len(val) > 0:
+                        b64_data = val[0]
+                    elif isinstance(val, str):
+                        b64_data = val
+                    break
+            
+            if b64_data:
+                if ',' in b64_data:
+                    b64_data = b64_data.split(',')[1]
+                image_bytes = base64.b64decode(b64_data)
+                with open(output_path, 'wb') as f:
+                    f.write(image_bytes)
+                return output_path
+                
+            # Поиск URL в типичных ключах
+            img_url = None
+            for key in ['url', 'image_url', 'link']:
+                if key in r:
+                    img_url = r[key]
+                    break
+            
+            if img_url:
+                print(f"Downloading image from returned URL: {img_url}")
+                download_file(img_url, output_path)
+                return output_path
+                
+        except json.JSONDecodeError:
+            # Если это не JSON, но тело ответа большое - возможно, это сырые байты картинки без заголовка Content-Type
+            if len(response.content) > 1000:
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                return output_path
+                
+        print("Could not parse image data from local API response.")
         return None
+    except Exception as e:
+        print(f"Failed to generate image via local API: {e}")
+        return None
+
 
 def generate_a1111(prompt, negative_prompt, output_path, width=512, height=512, url="http://127.0.0.1:7860/sdapi/v1/txt2img"):
     """Генерация изображения через API Automatic1111."""
@@ -153,68 +372,6 @@ def generate_a1111(prompt, negative_prompt, output_path, width=512, height=512, 
         print(f"Failed to connect to A1111 WebUI: {e}")
         return None
 
-def generate_comfyui(prompt, negative_prompt, output_path, width=512, height=512, url="http://127.0.0.1:8188"):
-    """Генерация изображения через API ComfyUI."""
-    workflow_path = os.path.join(os.getcwd(), 'comfyui_workflow.json')
-    workflow = None
-    if os.path.exists(workflow_path):
-        try:
-            with open(workflow_path, 'r', encoding='utf-8') as f:
-                workflow = json.load(f)
-        except Exception as e:
-            print(f"Failed to read comfyui_workflow.json: {e}")
-            
-    if workflow is None:
-        print("comfyui_workflow.json not found. ComfyUI request requires a configured workflow template.")
-        return None
-        
-    try:
-        for node_id, node in workflow.items():
-            class_type = node.get('class_type', '')
-            if class_type == 'CLIPTextEncode':
-                inputs = node.get('inputs', {})
-                if 'text' in inputs:
-                    if 'negative' in str(node_id) or 'bad' in str(inputs.get('text', '')).lower():
-                        node['inputs']['text'] = negative_prompt
-                    else:
-                        node['inputs']['text'] = prompt
-            elif class_type == 'EmptyLatentImage':
-                node['inputs']['width'] = width
-                node['inputs']['height'] = height
-                
-        p = {"prompt": workflow}
-        response = requests.post(f"{url}/prompt", json=p, timeout=20)
-        if response.status_code == 200:
-            print("ComfyUI prompt queued successfully. Waiting for output...")
-            time.sleep(5)
-            return None
-        else:
-            print(f"ComfyUI returned error: {response.text}")
-            return None
-    except Exception as e:
-        print(f"Failed to connect to ComfyUI: {e}")
-        return None
-
-def generate_local_api_image(prompt, negative_prompt, output_path, width=512, height=512, url="http://127.0.0.1:8000/txt2img"):
-    """Генерация через кастомный локальный API."""
-    payload = {
-        "prompt": prompt,
-        "negative_prompt": negative_prompt,
-        "width": width,
-        "height": height
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=60)
-        if response.status_code == 200:
-            with open(output_path, 'wb') as f:
-                f.write(response.content)
-            return output_path
-        else:
-            print(f"Local Image API returned error {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"Failed to connect to local image API: {e}")
-        return None
 
 def get_image_from_folder(folder_path, scene_id, index):
     """Поиск изображения в папке по ID сцены или по порядку."""
@@ -240,6 +397,7 @@ def get_image_from_folder(folder_path, scene_id, index):
         return os.path.join(folder_path, filename)
     return None
 
+
 def download_pexels_video(query, output_path, orientation_landscape=True):
     """Поиск и скачивание видео с Pexels."""
     try:
@@ -255,6 +413,35 @@ def download_pexels_video(query, output_path, orientation_landscape=True):
         print(f"Pexels video download failed: {e}")
         return None
 
+
+def generate_image_by_backend(backend, prompt, negative_prompt, output_path, width, height, scene_id, index, config):
+    """Маршрутизация генерации на основе выбранного бэкенда."""
+    render_cfg = config.get_render_config()
+    local_image_api_url = render_cfg.get('local_image_api_url')
+    image_folder_path = render_cfg.get('image_folder_path', 'input_images')
+    aspect_ratio = config.get_aspect_ratio()
+    
+    if backend == 'comfyui':
+        return generate_comfyui_image(prompt, negative_prompt, output_path, width, height, config)
+    elif backend == 'local_api':
+        return generate_local_api_image(prompt, negative_prompt, output_path, width, height, local_image_api_url)
+    elif backend == 'a1111':
+        return generate_a1111(prompt, negative_prompt, output_path, width, height, local_image_api_url)
+    elif backend == 'image_folder':
+        img_path = get_image_from_folder(image_folder_path, scene_id, index)
+        if img_path:
+            import shutil
+            shutil.copy2(img_path, output_path)
+            return output_path
+        return None
+    elif backend == 'stock_video':
+        return download_pexels_video(prompt, output_path, orientation_landscape=(aspect_ratio == "16:9"))
+    elif backend == 'none':
+        return None
+    else:
+        print(f"Unknown backend requested: {backend}")
+        return None
+
 # ----------------- ОБРАБОТКА РАЗМЕРОВ И ЭФФЕКТОВ -----------------
 
 def resize_and_crop_clip(clip, target_w, target_h):
@@ -265,11 +452,9 @@ def resize_and_crop_clip(clip, target_w, target_h):
     scale_h = target_h / clip_h
     scale = max(scale_w, scale_h)
     
-    # Ресайз с сохранением пропорций
     resized = resize_clip(clip, scale)
     resized_w, resized_h = resized.size
     
-    # Обрезаем из центра
     x1 = (resized_w - target_w) / 2
     y1 = (resized_h - target_h) / 2
     x2 = x1 + target_w
@@ -329,9 +514,18 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
         
     render_cfg = config.get_render_config()
     visual_backend = render_cfg.get('visual_backend', 'none').lower()
+    fallback_backend = render_cfg.get('fallback_backend', 'image_folder').lower()
+    fallback_to_black = render_cfg.get('fallback_to_black', True)
     default_motion_preset = render_cfg.get('motion_preset', 'slow_zoom_in')
-    local_image_api_url = render_cfg.get('local_image_api_url')
-    image_folder_path = render_cfg.get('image_folder_path', 'input_images')
+    
+    image_width = render_cfg.get('image_width', 576)
+    image_height = render_cfg.get('image_height', 1024)
+    
+    # Автоматическая корректировка разрешения генерации под соотношение сторон, если используются дефолтные значения
+    if aspect_ratio == "16:9" and image_width == 576 and image_height == 1024:
+        image_width, image_height = 1024, 576
+    elif aspect_ratio == "1:1" and image_width == 576 and image_height == 1024:
+        image_width, image_height = 768, 768
     
     magick_path = get_program_path("magick")
     if magick_path:
@@ -357,27 +551,50 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
         motion_preset = scene.get('camera_motion', default_motion_preset)
         
         visual_path = None
+        out_img = os.path.join(images_dir, f"scene_{scene_id}.png")
         
-        if visual_backend == 'sdxl_turbo':
-            out_img = os.path.join(images_dir, f"scene_{scene_id}.png")
-            visual_path = generate_sdxl_turbo(prompt, neg_prompt, out_img, target_w, target_h)
-        elif visual_backend == 'a1111':
-            out_img = os.path.join(images_dir, f"scene_{scene_id}.png")
-            visual_path = generate_a1111(prompt, neg_prompt, out_img, target_w, target_h, local_image_api_url)
-        elif visual_backend == 'comfyui':
-            out_img = os.path.join(images_dir, f"scene_{scene_id}.png")
-            visual_path = generate_comfyui(prompt, neg_prompt, out_img, target_w, target_h)
-        elif visual_backend == 'local_api':
-            out_img = os.path.join(images_dir, f"scene_{scene_id}.png")
-            visual_path = generate_local_api_image(prompt, neg_prompt, out_img, target_w, target_h, local_image_api_url)
-        elif visual_backend == 'image_folder':
-            visual_path = get_image_from_folder(image_folder_path, scene_id, idx)
-        elif visual_backend == 'stock_video':
-            out_video = os.path.join(images_dir, f"scene_{scene_id}.mp4")
-            visual_path = download_pexels_video(prompt, out_video, orientation_landscape=(aspect_ratio == "16:9"))
+        # --- Tier 1: Primary Backend ---
+        if visual_backend != 'none':
+            try:
+                print(f"\n--- Scene {scene_id}: Generating image with primary backend '{visual_backend}' ---")
+                
+                # If backend is stock_video, output path should use .mp4
+                actual_out_path = out_img
+                if visual_backend == 'stock_video':
+                    actual_out_path = os.path.join(images_dir, f"scene_{scene_id}.mp4")
+                    
+                visual_path = generate_image_by_backend(
+                    visual_backend, prompt, neg_prompt, actual_out_path, 
+                    image_width, image_height, scene_id, idx, config
+                )
+            except Exception as e:
+                print(f"Error on primary backend '{visual_backend}': {e}")
+                visual_path = None
+                
+        # --- Tier 2: Fallback Backend ---
+        if (not visual_path or not os.path.exists(visual_path)) and visual_backend != 'none':
+            clear_cuda_memory()
+            if fallback_backend and fallback_backend != visual_backend and fallback_backend != 'none':
+                try:
+                    print(f"Attempting fallback backend '{fallback_backend}'...")
+                    fallback_out_img = os.path.join(images_dir, f"scene_{scene_id}_fallback.png")
+                    if fallback_backend == 'stock_video':
+                        fallback_out_img = os.path.join(images_dir, f"scene_{scene_id}_fallback.mp4")
+                        
+                    visual_path = generate_image_by_backend(
+                        fallback_backend, prompt, neg_prompt, fallback_out_img,
+                        image_width, image_height, scene_id, idx, config
+                    )
+                except Exception as e:
+                    print(f"Error on fallback backend '{fallback_backend}': {e}")
+                    visual_path = None
+                    
+        # --- Post generation cleanup / garbage collection ---
+        if render_cfg.get('clear_cuda_cache_between_scenes', True):
+            clear_cuda_memory()
             
+        # --- Tier 3: Black Screen Fallback ---
         scene_clip = None
-        
         if visual_path and os.path.exists(visual_path):
             if visual_path.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
                 try:
@@ -401,12 +618,14 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
                     scene_clip = None
                     
         if scene_clip is None:
+            print(f"Rendering black screen for scene {scene_id} due to generation/fallback failure.")
             scene_clip = set_clip_duration(ColorClip(size=(target_w, target_h), color=(0, 0, 0)), duration)
             scene_clip = set_clip_position(scene_clip, "center")
             
         scene_clip = set_clip_start(scene_clip, current_time)
         visual_clips.append(scene_clip)
         
+        # Subtitles / Captions processing
         if config.get_captions_enabled():
             subtitle_text = scene.get('subtitle', '')
             if subtitle_text:
@@ -479,6 +698,7 @@ def render_video_from_scenes(audio_file_path, scenes_json_path, output_mp4_path)
         
     print(f"Rendering completed successfully. Final video saved at {output_mp4_path}")
     return output_mp4_path
+
 
 def get_output_media(audio_file_path, timed_captions, background_video_data, video_server):
     config = get_config()

@@ -133,13 +133,69 @@ class Config:
 
     def get_render_config(self) -> dict:
         default_render = {
-            'visual_backend': 'none',
+            'visual_backend': 'comfyui',
+            'model_preset': 'flux_schnell_fp8',
+            'acceleration_mode': 'schnell',
+            'image_width': 576,
+            'image_height': 1024,
+            'final_width': 1080,
+            'final_height': 1920,
+            'steps': 4,
+            'guidance_scale': 0.0,
+            'seed': -1,
+            'sampler': 'euler',
+            'scheduler': 'simple',
+            'lora_preset': 'none',
+            'lora_strength': 0.7,
             'motion_preset': 'slow_zoom_in',
             'captions_enabled': True,
-            'local_image_api_url': 'http://127.0.0.1:7860/sdapi/v1/txt2img',
-            'image_folder_path': 'input_images'
+            'comfyui_url': 'http://127.0.0.1:8188',
+            'comfyui_workflow_path': 'workflows/flux_schnell_fp8_4step.json',
+            'local_image_api_url': 'http://127.0.0.1:8000/txt2img',
+            'image_folder_path': 'input_images',
+            'fallback_backend': 'image_folder',
+            'fallback_to_black': True,
+            'clear_cuda_cache_between_scenes': True
         }
         return {**default_render, **self.yaml_config.get('render', {})}
+
+    def get_model_presets(self) -> dict:
+        return self.yaml_config.get('model_presets', {})
+
+    def get_model_preset(self, name: str) -> dict:
+        presets = self.get_model_presets()
+        return presets.get(name, {})
+
+    def get_acceleration_presets(self) -> dict:
+        return self.yaml_config.get('acceleration_presets', {})
+
+    def get_acceleration_preset(self, name: str) -> dict:
+        presets = self.get_acceleration_presets()
+        return presets.get(name, {})
+
+    def get_lora_presets(self) -> dict:
+        return self.yaml_config.get('lora_presets', {})
+
+    def get_lora_preset(self, name: str) -> dict:
+        presets = self.get_lora_presets()
+        return presets.get(name, {})
+
+    def get_comfyui_config(self) -> dict:
+        default_comfy = {
+            'url': 'http://127.0.0.1:8188',
+            'workflow_path': 'workflows/flux_schnell_fp8_4step.json',
+            'timeout_sec': 300,
+            'poll_interval_sec': 2,
+            'node_map': {}
+        }
+        return {**default_comfy, **self.yaml_config.get('comfyui', {})}
+
+    def get_huggingface_config(self) -> dict:
+        default_hf = {
+            'token_env': 'HF_TOKEN',
+            'use_auth_token': True
+        }
+        return {**default_hf, **self.yaml_config.get('huggingface', {})}
 
     def get_style_presets(self) -> dict:
         return self.yaml_config.get('style_presets', {})
@@ -286,20 +342,6 @@ class Config:
         if 'font_face' in caps:
             return str(caps['font_face'])
         return os.getenv('CAPTION_FONT_FACE', 'Arial-Bold')
-
-
-def get_config() -> Config:
-    try:
-        return Config()
-    except ConfigurationError as e:
-        print(f"\n{'='*70}")
-        print("ERROR: Configuration Failed")
-        print('='*70)
-        print(f"\n{str(e)}\n")
-        print("Please fix these issues and try again.")
-        print('='*70 + '\n')
-        raise
-
 
 
 def get_config() -> Config:

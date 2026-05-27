@@ -7,3 +7,6 @@ output/
 rendered_video.mp4
 audio_tts.wav
 test_scenes.json
+input_images/
+*.log
+
