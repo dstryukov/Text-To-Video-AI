@@ -9,19 +9,78 @@ llm_model: "gemini-2.5-flash"
 
 # Настройки озвучки (TTS)
 tts:
-  backend: "silero"
+  backend: "silero"              # f5_tts | fish_speech | cosyvoice | local_tts_api | silero | audio_file | none
+  fallback_backend: "silero"
+  mode: "per_scene"              # per_scene | full_script
+
   language: "ru"
-  # Голос (для Silero: aidar, baya, kseniya, xenia, eugene)
-  voice: "baya"
-  
-  # Темп речи (speed):
-  #   - Число (например: 1.0, 1.2, 0.8)
-  #   - Строковый пресет (x-slow, slow, medium, fast, x-fast)
-  speed: "medium"
+  voice: "default"
+  speed: 1.0
+  emotion: "neutral"             # neutral | dramatic | calm | energetic | documentary
   sample_rate: 24000
   format: "wav"
   normalize_text: true
-  local_api_url: "http://localhost:8010/tts"
+
+  # Для voice cloning
+  reference_audio_path: "voices/reference.wav"
+  reference_text: ""
+  use_voice_clone: true
+
+  # Chunking
+  max_chars_per_chunk: 350
+  pause_between_chunks_ms: 250
+
+  # Local API fallback
+  local_tts_api_url: "http://127.0.0.1:8020/tts"
+
+  # Бэкенд-специфичные настройки
+  f5_tts:
+    model: "F5-TTS"
+    device: "cuda"
+    dtype: "float16"
+    nfe_step: 32
+    cfg_strength: 2.0
+    sway_sampling_coef: -1.0
+    speed: 1.0
+
+  fish_speech:
+    model_path: "checkpoints/fish-speech"
+    device: "cuda"
+    dtype: "float16"
+    temperature: 0.7
+    top_p: 0.8
+    repetition_penalty: 1.1
+
+  cosyvoice:
+    model_path: "checkpoints/cosyvoice"
+    device: "cuda"
+    dtype: "float16"
+
+  silero:
+    voice: "baya"
+    sample_rate: 24000
+    speed: "medium"
+
+  audio_file:
+    path: "input_audio/voiceover.wav"
+
+  replacements:
+    "AI": "искусственный интеллект"
+    "API": "эй-пи-ай"
+    "URL": "ссылка"
+    "404": "четыреста четыре"
+    "403": "четыреста три"
+
+# Настройки постобработки голоса
+audio_postprocess:
+  enabled: true
+  normalize_loudness: true
+  target_lufs: -14
+  remove_silence: true
+  max_silence_ms: 500
+  add_compressor: true
+  noise_reduction: false
+
 
 # Настройки генератора визуальных промптов
 visual_generator:

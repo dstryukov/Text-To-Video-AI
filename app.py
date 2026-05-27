@@ -59,6 +59,20 @@ def main():
                         help="Override final video height (e.g. 1920)")
     parser.add_argument("--config", type=str, default=None, 
                         help="Path to custom config YAML file to load")
+    parser.add_argument("--tts-backend", type=str, default=None, 
+                        help="Override TTS backend (f5_tts, fish_speech, cosyvoice, local_tts_api, silero, audio_file, none)")
+    parser.add_argument("--tts-mode", type=str, default=None, 
+                        help="Override TTS mode (per_scene, full_script)")
+    parser.add_argument("--voice", type=str, default=None, 
+                        help="Override TTS voice name or path")
+    parser.add_argument("--reference-audio", type=str, default=None, 
+                        help="Override reference audio path for voice cloning")
+    parser.add_argument("--reference-text", type=str, default=None, 
+                        help="Override reference audio text transcription")
+    parser.add_argument("--tts-speed", type=str, default=None, 
+                        help="Override TTS speed (float or string preset)")
+    parser.add_argument("--emotion", type=str, default=None, 
+                        help="Override TTS emotion (neutral, energetic, calm, etc.)")
     
     args = parser.parse_args()
     
@@ -113,6 +127,26 @@ def main():
         config.yaml_config.setdefault('render', {})['final_width'] = args.final_width
     if args.final_height is not None:
         config.yaml_config.setdefault('render', {})['final_height'] = args.final_height
+        
+    # CLI Overrides for TTS
+    if args.tts_backend:
+        config.yaml_config.setdefault('tts', {})['backend'] = args.tts_backend
+    if args.tts_mode:
+        config.yaml_config.setdefault('tts', {})['mode'] = args.tts_mode
+    if args.voice:
+        config.yaml_config.setdefault('tts', {})['voice'] = args.voice
+    if args.reference_audio:
+        config.yaml_config.setdefault('tts', {})['reference_audio_path'] = args.reference_audio
+    if args.reference_text:
+        config.yaml_config.setdefault('tts', {})['reference_text'] = args.reference_text
+    if args.tts_speed is not None:
+        try:
+            speed_val = float(args.tts_speed)
+        except ValueError:
+            speed_val = args.tts_speed
+        config.yaml_config.setdefault('tts', {})['speed'] = speed_val
+    if args.emotion:
+        config.yaml_config.setdefault('tts', {})['emotion'] = args.emotion
         
     project_name = config.get_project_name()
     output_dir = os.path.join("output", project_name)
@@ -172,71 +206,119 @@ def main():
     else:
         scenes = generate_visual_prompts(script_content, scenes_json_path)
         
-    # 4. Генерация озвучки для каждой сцены
-    # Мы генерируем аудио отдельно для каждой сцены, чтобы точно знать длительность звука.
-    # Это гарантирует 100% совпадение звука и видео без использования Whisper/STT.
-    print("\n--- Generating Audio (TTS) for scenes ---")
+    # 4. Генерация озвучки
+    print("\n--- Generating Audio (TTS) ---")
     tts_config = config.get_tts_config()
     audio_dir = os.path.join(output_dir, "audio_scenes")
     os.makedirs(audio_dir, exist_ok=True)
     
-    audio_paths = []
-    sample_rate = int(tts_config.get('sample_rate', 24000))
     audio_ext = tts_config.get('format', 'wav')
+    sample_rate = int(tts_config.get('sample_rate', 24000))
+    tts_mode = tts_config.get('mode', 'per_scene')
+    backend = tts_config.get('backend', 'silero').lower()
     
-    for idx, scene in enumerate(scenes):
-        scene_id = scene.get('scene_id', idx + 1)
-        scene_text = scene.get('text', '')
+    # Режим audio_file автоматически переходит в full_script логику
+    if backend == 'audio_file':
+        tts_mode = 'full_script'
         
-        scene_audio_filename = f"scene_{scene_id}.{audio_ext}"
-        scene_audio_path = os.path.join(audio_dir, scene_audio_filename)
+    master_audio_path = os.path.join(output_dir, f"audio_tts.{audio_ext}")
+    
+    if tts_mode == 'full_script':
+        print(f"TTS mode: full_script (Backend: {backend})")
+        # 1. Объединяем весь текст сценария
+        combined_text = " ".join(scene.get('text', '') for scene in scenes)
         
-        # Синтез речи для сцены
-        generate_tts(scene_text, scene_audio_path, tts_config)
-        audio_paths.append(scene_audio_path)
+        # 2. Генерируем единый мастер-трек
+        generate_tts(combined_text, master_audio_path, tts_config)
         
-        # Получаем реальную длительность сгенерированного файла
-        duration = 4.0
+        # 3. Измеряем его длительность
+        total_duration = 0.0
         try:
             if audio_ext == 'wav':
-                with wave.open(scene_audio_path, 'rb') as wav_f:
+                with wave.open(master_audio_path, 'rb') as wav_f:
                     frames = wav_f.getnframes()
                     rate = wav_f.getframerate()
-                    duration = frames / float(rate)
+                    total_duration = frames / float(rate)
             else:
-                # Для mp3 используем MoviePy
-                audio_clip = AudioFileClip(scene_audio_path)
-                duration = audio_clip.duration
+                audio_clip = AudioFileClip(master_audio_path)
+                total_duration = audio_clip.duration
                 audio_clip.close()
         except Exception as e:
-            print(f"Warning: Could not read precise audio duration for {scene_audio_filename}: {e}. Using words estimation.")
-            duration = max(2.5, len(scene_text.split()) / 2.5)
+            print(f"Warning: Could not read precise audio duration for master track: {e}. Estimating.")
+            total_duration = max(5.0, len(combined_text.split()) / 2.5)
             
-        print(f"Scene {scene_id} audio duration: {duration:.2f}s")
-        scene['duration'] = duration
+        print(f"Master audio track ready. Total duration: {total_duration:.2f}s")
         
-    # Перезаписываем scenes.json с уточненными длительностями
-    with open(scenes_json_path, 'w', encoding='utf-8') as f:
-        json.dump(scenes, f, ensure_ascii=False, indent=2)
-        
-    # 5. Объединение аудиофайлов в один мастер-трек
-    master_audio_path = os.path.join(output_dir, f"audio_tts.{audio_ext}")
-    print(f"\nConcatenating audio clips into master track: {master_audio_path}")
-    
-    try:
-        clips = [AudioFileClip(ap) for ap in audio_paths]
-        final_audio = concatenate_audioclips(clips)
-        final_audio.write_audiofile(master_audio_path, fps=sample_rate, logger=None)
-        
-        # Закрываем ресурсы
-        final_audio.close()
-        for c in clips:
-            c.close()
-    except Exception as e:
-        print(f"Error concatenating audio clips: {e}")
-        # В случае сбоя берем первый попавшийся или создаем пустышку
-        if audio_paths:
-            shutil.copy2(audio_paths[0], master_audio_path)
+        # 4. Распределяем длительность сцен пропорционально количеству слов
+        total_words = sum(len(scene.get('text', '').split()) for scene in scenes)
+        if total_words == 0:
+            total_words = 1
+            
+        for idx, scene in enumerate(scenes):
+            scene_text = scene.get('text', '')
+            words = len(scene_text.split())
+            ratio = words / total_words
+            duration = total_duration * ratio
+            if duration < 1.0:
+                duration = 1.0
+            scene['duration'] = duration
+            print(f"Scene {scene.get('scene_id', idx+1)} word count: {words}, proportional duration: {duration:.2f}s")
+            
+        # Записываем уточненные длительности в scenes.json
+        with open(scenes_json_path, 'w', encoding='utf-8') as f:
+            json.dump(scenes, f, ensure_ascii=False, indent=2)
+            
+    else:
+        print(f"TTS mode: per_scene (Backend: {backend})")
+        audio_paths = []
+        for idx, scene in enumerate(scenes):
+            scene_id = scene.get('scene_id', idx + 1)
+            scene_text = scene.get('text', '')
+            
+            scene_audio_filename = f"scene_{scene_id}.{audio_ext}"
+            scene_audio_path = os.path.join(audio_dir, scene_audio_filename)
+            
+            # Синтезируем аудио для каждой сцены
+            generate_tts(scene_text, scene_audio_path, tts_config)
+            audio_paths.append(scene_audio_path)
+            
+            # Измеряем длительность чанка
+            duration = 4.0
+            try:
+                if audio_ext == 'wav':
+                    with wave.open(scene_audio_path, 'rb') as wav_f:
+                        frames = wav_f.getnframes()
+                        rate = wav_f.getframerate()
+                        duration = frames / float(rate)
+                else:
+                    audio_clip = AudioFileClip(scene_audio_path)
+                    duration = audio_clip.duration
+                    audio_clip.close()
+            except Exception as e:
+                print(f"Warning: Could not read precise audio duration for {scene_audio_filename}: {e}. Estimating.")
+                duration = max(2.5, len(scene_text.split()) / 2.5)
+                
+            print(f"Scene {scene_id} audio duration: {duration:.2f}s")
+            scene['duration'] = duration
+            
+        # Записываем уточненные длительности в scenes.json
+        with open(scenes_json_path, 'w', encoding='utf-8') as f:
+            json.dump(scenes, f, ensure_ascii=False, indent=2)
+            
+        # Объединяем отдельные аудиофайлы в один мастер-трек
+        print(f"\nConcatenating audio clips into master track: {master_audio_path}")
+        try:
+            clips = [AudioFileClip(ap) for ap in audio_paths]
+            final_audio = concatenate_audioclips(clips)
+            final_audio.write_audiofile(master_audio_path, fps=sample_rate, logger=None)
+            
+            final_audio.close()
+            for c in clips:
+                c.close()
+        except Exception as e:
+            print(f"Error concatenating audio clips: {e}")
+            if audio_paths:
+                shutil.copy2(audio_paths[0], master_audio_path)
             
     # 6. Запуск сборки видео (Рендеринг)
     print("\n--- Starting Video Assembly (Render Engine) ---")

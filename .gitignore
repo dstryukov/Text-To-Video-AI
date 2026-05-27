@@ -9,4 +9,7 @@ audio_tts.wav
 test_scenes.json
 input_images/
 *.log
+input_audio/
+voices/
+*TEMP_MPY*
 

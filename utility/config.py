@@ -94,26 +94,87 @@ class Config:
     def get_tts_config(self) -> dict:
         default_tts = {
             'backend': 'silero',
+            'fallback_backend': 'silero',
+            'mode': 'per_scene',
             'language': 'ru',
-            'voice': 'xenia',
-            'speed': 'medium',
+            'voice': 'default',
+            'speed': 1.0,
+            'emotion': 'neutral',
             'sample_rate': 24000,
             'format': 'wav',
             'normalize_text': True,
-            'local_api_url': 'http://localhost:8010/tts'
+            'reference_audio_path': 'voices/reference.wav',
+            'reference_text': '',
+            'use_voice_clone': True,
+            'max_chars_per_chunk': 350,
+            'pause_between_chunks_ms': 250,
+            'local_tts_api_url': 'http://127.0.0.1:8020/tts',
+            'f5_tts': {
+                'model': 'F5-TTS',
+                'device': 'cuda',
+                'dtype': 'float16',
+                'nfe_step': 32,
+                'cfg_strength': 2.0,
+                'sway_sampling_coef': -1.0,
+                'speed': 1.0
+            },
+            'fish_speech': {
+                'model_path': 'checkpoints/fish-speech',
+                'device': 'cuda',
+                'dtype': 'float16',
+                'temperature': 0.7,
+                'top_p': 0.8,
+                'repetition_penalty': 1.1
+            },
+            'cosyvoice': {
+                'model_path': 'checkpoints/cosyvoice',
+                'device': 'cuda',
+                'dtype': 'float16'
+            },
+            'silero': {
+                'voice': 'baya',
+                'sample_rate': 24000,
+                'speed': 'medium'
+            },
+            'audio_file': {
+                'path': 'input_audio/voiceover.wav'
+            },
+            'replacements': {
+                'AI': 'искусственный интеллект',
+                'API': 'эй-пи-ай',
+                'URL': 'ссылка',
+                '404': 'четыреста четыре',
+                '403': 'четыреста три'
+            }
         }
         user_tts = self.yaml_config.get('tts', {})
-        merged = {**default_tts, **user_tts}
         
-        # Override with env variables if present
+        # Merge nested dicts (f5_tts, fish_speech, cosyvoice, replacements)
+        merged = {}
+        for k, v in default_tts.items():
+            if isinstance(v, dict) and k in user_tts and isinstance(user_tts[k], dict):
+                merged[k] = {**v, **user_tts[k]}
+            else:
+                merged[k] = user_tts.get(k, v)
+                
+        # Handle env variables if present
         if os.getenv('TTS_PROVIDER'):
             merged['backend'] = os.getenv('TTS_PROVIDER')
-        if os.getenv('EDGETTS_VOICE') and merged['backend'] == 'edgetts':
-            merged['voice'] = os.getenv('EDGETTS_VOICE')
-        elif os.getenv('ELEVENLABS_VOICE_ID') and merged['backend'] == 'elevenlabs':
-            merged['voice'] = os.getenv('ELEVENLABS_VOICE_ID')
             
         return merged
+
+    def get_audio_postprocess_config(self) -> dict:
+        default_pp = {
+            'enabled': True,
+            'normalize_loudness': True,
+            'target_lufs': -14,
+            'remove_silence': True,
+            'max_silence_ms': 500,
+            'add_compressor': True,
+            'noise_reduction': False
+        }
+        return {**default_pp, **self.yaml_config.get('audio_postprocess', {})}
+
 
     def get_visual_generator_config(self) -> dict:
         default_vg = {
