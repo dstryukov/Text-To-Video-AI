@@ -561,6 +561,10 @@ def get_image_from_folder(folder_path, scene_id, index):
     return None
 
 
+def is_video_file(path):
+    return path.lower().endswith(('.mp4', '.mov', '.avi', '.mkv'))
+
+
 def download_pexels_video(query, output_path, orientation_landscape=True):
     """Поиск и скачивание видео с Pexels."""
     pexels_key = os.getenv('PEXELS_API_KEY')
@@ -601,9 +605,13 @@ def generate_image_by_backend(backend, prompt, negative_prompt, output_path, wid
     elif backend == 'image_folder':
         img_path = get_image_from_folder(image_folder_path, scene_id, index)
         if img_path:
+            if is_video_file(img_path):
+                return img_path
             import shutil
-            shutil.copy2(img_path, output_path)
-            return output_path
+            root, ext = os.path.splitext(output_path)
+            image_output_path = output_path if ext.lower() in ('.png', '.jpg', '.jpeg') else root + ".png"
+            shutil.copy2(img_path, image_output_path)
+            return image_output_path
         return None
     elif backend == 'stock_video':
         return download_pexels_video(prompt, output_path, orientation_landscape=(aspect_ratio == "16:9"))

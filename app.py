@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--preset", type=str, default=None, 
                         help="Override style preset (cinematic_realistic, documentary, etc.)")
     parser.add_argument("--backend", type=str, default=None, 
-                        help="Override visual backend (none, comfyui, local_api, image_folder)")
+                        help="Override visual backend (none, comfyui, local_api, image_folder, stock_video)")
     parser.add_argument("--aspect", type=str, default=None, 
                         help="Override aspect ratio (9:16, 16:9, 1:1)")
     

@@ -117,7 +117,6 @@ class Config:
                 'model': 'F5-TTS',
                 'device': 'cuda',
                 'dtype': 'float16',
-                'nfe_step': 32,
                 'cfg_strength': 2.0,
                 'sway_sampling_coef': -1.0,
                 'speed': 1.0
@@ -196,14 +195,14 @@ class Config:
 
     def get_render_config(self) -> dict:
         default_render = {
-            'visual_backend': 'comfyui',
-            'model_preset': 'flux_schnell_fp8',
-            'acceleration_mode': 'schnell',
+            'visual_backend': 'image_folder',
+            'model_preset': 'z_image_turbo_gguf',
+            'acceleration_mode': 'turbo',
             'image_width': 576,
             'image_height': 1024,
             'final_width': 1080,
             'final_height': 1920,
-            'steps': 4,
+            'steps': 6,
             'guidance_scale': 0.0,
             'seed': -1,
             'sampler': 'euler',
@@ -213,7 +212,7 @@ class Config:
             'motion_preset': 'slow_zoom_in',
             'captions_enabled': True,
             'comfyui_url': 'http://127.0.0.1:8188',
-            'comfyui_workflow_path': 'workflows/flux_schnell_fp8_4step.json',
+            'comfyui_workflow_path': 'workflows/z_image_turbo_gguf_6step.json',
             'local_image_api_url': 'http://127.0.0.1:8000/txt2img',
             'image_folder_path': 'input_images',
             'fallback_backend': 'image_folder',

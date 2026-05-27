@@ -311,10 +311,12 @@ def generate_f5_tts(text: str, output_path: str, config: dict):
         nfe = int(user_nfe)
     device = f5_cfg.get('device', 'cuda')
     dtype = f5_cfg.get('dtype', 'float16')
+    f5tts = None
     
     # 1. Попытка импорта библиотеки python API
     try:
         from f5_tts.api import F5TTS
+        from utility.memory import clear_memory
         print("F5-TTS: Инициализация python API...")
         # Локальный импорт torch для dtype
         import torch
@@ -366,6 +368,16 @@ def generate_f5_tts(text: str, output_path: str, config: dict):
             raise RuntimeError(
                 "F5-TTS is not installed. Install it or switch tts.backend to silero/local_tts_api."
             )
+    finally:
+        try:
+            del f5tts
+        except Exception:
+            pass
+        try:
+            from utility.memory import clear_memory
+            clear_memory()
+        except Exception:
+            pass
 
 def generate_fish_speech(text: str, output_path: str, config: dict):
     """Синтез через Fish Speech."""
@@ -404,6 +416,7 @@ def generate_cosyvoice(text: str, output_path: str, config: dict):
     ref_audio = config.get('reference_audio_path', 'voices/reference.wav')
     use_clone = config.get('use_voice_clone', True)
     model_path = cosy_cfg.get('model_path', 'checkpoints/cosyvoice')
+    cosyvoice = None
     
     try:
         from cosyvoice.cli.cosyvoice import CosyVoice
@@ -430,6 +443,16 @@ def generate_cosyvoice(text: str, output_path: str, config: dict):
     except Exception as e:
         print(f"CosyVoice python inference failed: {e}")
         raise RuntimeError("CosyVoice is not installed. Falling back.")
+    finally:
+        try:
+            del cosyvoice
+        except Exception:
+            pass
+        try:
+            from utility.memory import clear_memory
+            clear_memory()
+        except Exception:
+            pass
 
 def generate_local_tts_api(text: str, output_path: str, config: dict):
     """Синтез через универсальный POST HTTP-сервис."""
@@ -440,6 +463,11 @@ def generate_local_tts_api(text: str, output_path: str, config: dict):
         "voice": config.get('voice', 'default'),
         "speed": float(config.get('speed', 1.0)),
         "emotion": config.get('emotion', 'neutral'),
+        "backend": config.get('backend', 'local_tts_api'),
+        "quality_preset": config.get('quality_preset', 'balanced'),
+        "f5_tts": config.get('f5_tts', {}),
+        "fish_speech": config.get('fish_speech', {}),
+        "cosyvoice": config.get('cosyvoice', {}),
         "reference_audio_path": config.get('reference_audio_path', 'voices/reference.wav'),
         "reference_text": config.get('reference_text', ''),
         "sample_rate": int(config.get('sample_rate', 24000)),
