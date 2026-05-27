@@ -10,8 +10,8 @@ project_name: "space_facts"
 aspect_ratio: "9:16"
 
 # Провайдер LLM для генерации сценария и промптов (openai, groq, gemini)
-llm_provider: "openai"
-llm_model: "gpt-4o"
+llm_provider: "gemini"
+llm_model: "gemini-2.5-flash"
 
 # 1. Настройки Text-To-Speech (TTS)
 tts:
@@ -22,7 +22,7 @@ tts:
   language: "ru"
   
   # Голос (для Silero: aidar, baya, kseniya, xenia, eugene)
-  voice: "xenia"
+  voice: "baya"
   
   # Темп речи (speed):
   #   - Число (например: 1.0, 1.2, 0.8)
@@ -55,7 +55,7 @@ visual_generator:
 # 3. Настройки Render Engine
 render:
   # Бэкенд визуализации: sdxl_turbo | comfyui | a1111 | local_api | image_folder | stock_video | none
-  visual_backend: "none"
+  visual_backend: "sdxl_turbo"
   
   # Пресет анимации камеры для статических изображений:
   #   - none (без движения)
