@@ -7,6 +7,7 @@ import tempfile
 import platform
 import subprocess
 import math
+import uuid
 
 try:
     from moviepy.editor import (AudioFileClip, CompositeVideoClip, CompositeAudioClip, ImageClip,
@@ -249,6 +250,25 @@ def resolve_generation_params(config):
 
 # ----------------- БЭКЕНДЫ ГЕНЕРАЦИИ ИЗОБРАЖЕНИЙ -----------------
 
+def clean_comfyui_prompt(workflow):
+    """Return only valid ComfyUI API prompt nodes."""
+    if not isinstance(workflow, dict):
+        print(f"Warning: ComfyUI workflow must be a dict, got {type(workflow).__name__}.")
+        return {}
+
+    cleaned = {}
+    for node_id, node in workflow.items():
+        if isinstance(node, dict) and 'class_type' in node and 'inputs' in node:
+            cleaned[str(node_id)] = node
+            continue
+
+        print(
+            "Warning: Skipping invalid top-level ComfyUI prompt item "
+            f"{node_id!r} ({type(node).__name__})."
+        )
+    return cleaned
+
+
 def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, config):
     """
     Генерация изображения через REST API ComfyUI с динамическим маппингом параметров.
@@ -359,7 +379,12 @@ def generate_comfyui_image(prompt, negative_prompt, output_path, width, height, 
             set_workflow_value(workflow, path, val)
             
     # 4. Отправка POST запроса на запуск
-    p = {"prompt": workflow}
+    workflow = clean_comfyui_prompt(workflow)
+    print(f"ComfyUI workflow nodes sent: {len(workflow)}")
+    p = {
+        "prompt": workflow,
+        "client_id": str(uuid.uuid4())
+    }
     try:
         response = requests.post(f"{comfyui_url}/prompt", json=p, timeout=30)
         response.raise_for_status()
